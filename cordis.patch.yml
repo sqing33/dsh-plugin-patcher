@@ -1,0 +1,8 @@
+# Bundle patch for dsh-reasoning-ladder.
+# Registers the plugin with a no-config default: the ladder is a pure
+# function of the five-rung defaults, so an empty config is correct here.
+
+- insert:
+    - id: reasoning-ladder
+      name: dsh-reasoning-ladder
+      config: {}

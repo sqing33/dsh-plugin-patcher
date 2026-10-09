@@ -1,0 +1,83 @@
+{
+  "name": "dsh-reasoning-ladder",
+  "version": "0.1.0",
+  "description": "Forces a five-rung reasoning-effort ladder (off/medium/high/xhigh/max) into DeepSeek Harness llm-pi-ai settings and the profile patch.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "reasoning-effort",
+    "reasoning-ladder",
+    "model-settings",
+    "llm-pi-ai",
+    "typescript",
+    "cordis"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sqing33/dsh-reasoning-ladder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sqing33/dsh-reasoning-ladder/issues"
+  },
+  "homepage": "https://github.com/sqing33/dsh-reasoning-ladder#readme",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "node --experimental-strip-types --test test/reasoning-settings.test.ts test/patch-rewrite.test.ts test/golden.test.ts",
+    "verify": "node scripts/verify-package.mjs",
+    "prepublishOnly": "pnpm run build && pnpm test && pnpm run verify"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-settings": "*",
+    "@deepseek-ai/dsh-llm-pi-ai": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm-pi-ai": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.2",
+    "typescript": "^5.8.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "author": ""
+}

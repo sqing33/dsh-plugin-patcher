@@ -1,0 +1,82 @@
+{
+  "providers": {
+    "openai-compatible": {
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra"
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": false
+        }
+      ],
+      "modelOverrides": {
+        "gpt-6-astra": {
+          "reasoningEfforts": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        "gpt-5-code": {
+          "reasoningEfforts": {
+            "low": "low"
+          }
+        }
+      }
+    },
+    "anthropic": {
+      "api": "anthropic",
+      "reasoning": "enabled",
+      "models": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus"
+        }
+      ]
+    },
+    "unknownproto": {
+      "models": [
+        {
+          "id": "weird-1"
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "minimal": "minimal"
+          }
+        }
+      ]
+    },
+    "emptymodels": {
+      "api": "deepseek",
+      "models": []
+    },
+    "noModelsKey": {
+      "api": "deepseek"
+    },
+    "malformed": "nope",
+    "modelsNotArray": {
+      "api": "deepseek",
+      "models": {
+        "a": 1
+      }
+    }
+  }
+}

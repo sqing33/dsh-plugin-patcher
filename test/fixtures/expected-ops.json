@@ -1,0 +1,1251 @@
+{
+  "default": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "auto off, one provider": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "auto off, provider disabled": [],
+  "defaults.efforts additive": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "MAX"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "MAX"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "MAX"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "MAX"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "MAX"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "MAX"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "MAX"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "MAX"
+          }
+        }
+      ]
+    }
+  ],
+  "defaults.api override": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "none",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "none",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "provider efforts override": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "none",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "model-level override": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "H",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "provider reasoning fill": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "reasoning"
+      ],
+      "value": "enabled"
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "model disabled via config": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": false
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "empty config object": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-6-astra",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "modelOverrides",
+        "gpt-5-code",
+        "reasoningEfforts"
+      ],
+      "value": {
+        "off": "off",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "overwrite off": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": false
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "minimal": "minimal"
+          }
+        }
+      ]
+    }
+  ],
+  "modelOverrides off": [
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "openai-compatible",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "gpt-6-astra",
+          "name": "Astra",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-6-astra-mini",
+          "name": "Astra Mini",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "gpt-5-code",
+          "name": "Code",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "anthropic",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "claude-opus-5",
+          "name": "Opus",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    },
+    {
+      "op": "set",
+      "path": [
+        "providers",
+        "unknownproto",
+        "models"
+      ],
+      "value": [
+        {
+          "id": "weird-1",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "weird-2",
+          "reasoningEfforts": {
+            "off": "off",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        }
+      ]
+    }
+  ]
+}

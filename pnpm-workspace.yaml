@@ -1,0 +1,5 @@
+packages:
+  - '.'
+# Every @deepseek-ai/* package is provided by the host at runtime;
+# resolving them here would fail, they are never bundled.
+autoInstallPeers: false
