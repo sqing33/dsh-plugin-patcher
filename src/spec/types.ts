@@ -1,0 +1,122 @@
+/**
+ * The patch spec, as a client would type it into the settings form.
+ *
+ * Everything here is plain JSON on purpose: the spec is stored in this
+ * plugin's own settings namespace, so it round-trips through dsh-settings,
+ * through a profile patch file, and through a YAML import/export without any
+ * bespoke serialisation. Keep it that way.
+ */
+
+/** A value that is already JSON, or a request for a bundled generator. */
+export interface GeneratorRequest {
+  /** Id of a generator registered in src/generators/registry.ts. */
+  $gen: string
+  /** Generator-specific arguments; see the generator's own schema. */
+  args?: Record<string, unknown>
+}
+
+/** The value an op writes. Discriminated by the presence of a `$gen` key. */
+export type Value = GeneratorRequest | Json
+
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | Json[]
+  | { [key: string]: Json }
+
+/** One exact-string substitution inside a package file. */
+export interface CodeEdit {
+  /** The exact text to find. Treated as a literal, never as a pattern. */
+  find: string
+  /** Replacement text. */
+  replace: string
+  /**
+   * How many occurrences `find` must match. Always 1: a patch that is about
+   * to rewrite a line of someone else's shipped bundle must fail loudly
+   * rather than silently replace every occurrence.
+   */
+  count: 1
+}
+
+/** Rewrite one namespace of another plugin's settings. */
+export interface SettingsTarget {
+  kind: 'settings'
+  /** The target plugin's profile entry id, i.e. its settings namespace. */
+  namespace: string
+}
+
+/** Rewrite one row of the profile's cordis.patch.yml. */
+export interface PatchRowTarget {
+  kind: 'patch-row'
+  /** The `- id:` value of the row to edit. */
+  rowId: string
+  /** Optional `name:` guard: refuse to edit the row unless it also matches. */
+  name?: string
+}
+
+/**
+ * Rewrite a file inside another plugin's installed package.
+ *
+ * The host only ever reads this target. Applying an edit needs pnpm, which
+ * owns the node_modules tree, so scripts/apply-code-patch.mjs does it in its
+ * own process.
+ */
+export interface PackageFileTarget {
+  kind: 'package-file'
+  /** The package name as it appears in the profile's dependencies. */
+  pkg: string
+  /** Exact installed version. A mismatch is `unsupported`, never `drifted`. */
+  version?: string
+  /**
+   * Package-relative file path. Rejects absolute paths and any `..` segment
+   * so a spec can never reach outside the package it names.
+   */
+  path: string
+}
+
+export type Target = SettingsTarget | PatchRowTarget | PackageFileTarget
+
+export type Op =
+  /** Write a value (or a generated value) at a path. */
+  | { kind: 'set'; path: string[]; value: Value }
+  /** Remove a path. */
+  | { kind: 'unset'; path: string[] }
+  /** Merge keys into a patch row's `config:` block. */
+  | { kind: 'merge-config'; config: Record<string, Json> }
+  /** Enable or disable a patch row, through the plugin manager's own API. */
+  | { kind: 'set-enabled'; enabled: boolean }
+  /** Apply exact-string edits to a package file. */
+  | { kind: 'code'; edits: CodeEdit[] }
+  /** Assert a target's current shape without writing anything. */
+  | { kind: 'verify-only' }
+
+export interface Patch {
+  /** Stable id, unique within the spec; the journal is keyed by it. */
+  id: string
+  /** false = roll this patch back instead of applying it. */
+  enabled: boolean
+  /** Why this patch exists. Required, and shown verbatim in the settings page. */
+  reason: string
+  target: Target
+  op: Op
+}
+
+export interface PatcherConfig {
+  patches: Patch[]
+  /**
+   * Bumped by the settings page to force a full re-reconcile. The host treats
+   * any change as "recompute everything from scratch", so a client needs no
+   * separate control channel.
+   */
+  reconcileNonce: number
+}
+
+export const PATCH_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/
+export const PACKAGE_PATH_PATTERN = /^[^/\\][^\\\0]*$/
+
+/** The ops that address a sub-path of their target. */
+export function opPath(op: Op): string[] | undefined {
+  return 'path' in op ? op.path : undefined
+}

@@ -48,9 +48,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-llm-pi-ai": "*",
     "@deepseek-ai/dsh-settings": "*",
-    "@deepseek-ai/dsh-llm-pi-ai": "*"
+    "@deepseek-ai/schemastery": "*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -67,6 +67,7 @@
     }
   },
   "devDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4",
     "tsdown": "^0.22.2",
     "typescript": "^5.8.0"
   },
