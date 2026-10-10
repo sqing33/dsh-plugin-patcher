@@ -1,0 +1,43 @@
+{
+  "patches": [
+    {
+      "id": "reasoning-effort-force-effort-tiers",
+      "enabled": true,
+      "reason": "reasoning-effort writes llm-pi-ai settings, but a model list declared in cordis.patch.yml is the source of truth, so the settings write stays invisible. This rewrites the patch file itself, which no settings layer can do.",
+      "target": {
+        "kind": "package-file",
+        "pkg": "dsh-reasoning-effort",
+        "version": "0.2.8",
+        "path": "lib/index.js"
+      },
+      "op": {
+        "kind": "code",
+        "edits": [
+          {
+            "find": "import z from \"@deepseek-ai/schemastery\";\n//#region src/reasoning-protocols.ts",
+            "replace": "import z from \"@deepseek-ai/schemastery\";\nimport { forcePatchEffortTiers } from \"./force-effort-tiers.js\";\n//#region src/reasoning-protocols.ts",
+            "count": 1
+          },
+          {
+            "find": "const reasoningConfigSchema = z.object({\n\tauto: z.boolean(),",
+            "replace": "const reasoningConfigSchema = z.object({\n\tforce: z.boolean(),\n\tauto: z.boolean(),",
+            "count": 1
+          },
+          {
+            "find": "function apply(ctx, config = {}) {\n\tapplyReasoningEffort(ctx, config);\n}",
+            "replace": "function apply(ctx, config = {}) {\n\tforcePatchEffortTiers(ctx, config);\n\tapplyReasoningEffort(ctx, config);\n}",
+            "count": 1
+          }
+        ],
+        "files": [
+          {
+            "path": "lib/force-effort-tiers.js",
+            "source": "patches/dsh-reasoning-effort/lib/force-effort-tiers.js"
+          }
+        ]
+      }
+    }
+  ],
+  "reconcileNonce": 0,
+  "initialized": false
+}

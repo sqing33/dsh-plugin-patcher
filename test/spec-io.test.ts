@@ -570,8 +570,61 @@ describe('validateDraft', () => {
     rejects({ target: TARGETS['patch-row'], op: { kind: 'merge-config', config: {} } }, 'op.config')
   })
 
-  it('refuses a code patch with no edits', () => {
+  it('refuses a code patch that would change nothing', () => {
     rejects({ target: TARGETS['package-file'], op: { kind: 'code', edits: [] } }, 'op.edits')
+    rejects({ target: TARGETS['package-file'], op: { kind: 'code', edits: [], files: [] } }, 'op.files')
+  })
+
+  it('accepts a code patch carrying only files', () => {
+    const only = draft({
+      target: TARGETS['package-file'],
+      op: { kind: 'code', edits: [], files: [{ path: 'lib/injected.js', source: 'patches/pkg/lib/injected.js' }] },
+    })
+    assert.equal(validateDraft(only, usedState), undefined)
+  })
+
+  it('refuses a file with no path, no source, a duplicate, or the target itself', () => {
+    const file = (entry: Record<string, string>) => ({
+      target: TARGETS['package-file'],
+      op: { kind: 'code', edits: [], files: [entry] },
+    })
+    rejects(file({ source: 'patches/pkg/lib/x.js' }), 'op.files[].path')
+    rejects(file({ path: 'lib/x.js' }), 'no source')
+    rejects(
+      {
+        target: TARGETS['package-file'],
+        op: {
+          kind: 'code',
+          edits: [],
+          files: [
+            { path: 'lib/x.js', source: 'patches/pkg/lib/x.js' },
+            { path: 'lib/x.js', source: 'patches/pkg/lib/y.js' },
+          ],
+        },
+      },
+      'twice',
+    )
+    rejects(
+      {
+        target: { kind: 'package-file', pkg: PKG, version: '1.0.0', path: 'lib/index.js' },
+        op: {
+          kind: 'code',
+          edits: [{ find: 'a', replace: 'b', count: 1 }],
+          files: [{ path: 'lib/index.js', source: 'patches/pkg/lib/index.js' }],
+        },
+      },
+      'would overwrite the target file',
+    )
+  })
+
+  it('survives a draft from a spec that predates op.files', () => {
+    const legacy = draft({
+      target: TARGETS['package-file'],
+      op: { kind: 'code', edits: [{ find: 'a', replace: 'b', count: 1 }] } as never,
+    })
+    assert.equal(validateDraft(legacy, usedState), undefined)
+    const emptyLegacy = draft({ target: TARGETS['package-file'], op: { kind: 'code', edits: [] } as never })
+    assert.match(validateDraft(emptyLegacy, usedState) ?? '', /op\.files/)
   })
 
   it('refuses a package-file patch that pinned no version', () => {
@@ -595,6 +648,7 @@ describe('validateDraft', () => {
       ['op.path', { op: { kind: 'unset', path: [] } }],
       ['op.config', { target: TARGETS['patch-row'], op: { kind: 'merge-config', config: {} } }],
       ['op.edits', { target: TARGETS['package-file'], op: { kind: 'code', edits: [] } }],
+      ['op.files[].path', { target: TARGETS['package-file'], op: { kind: 'code', edits: [], files: [{ source: 'p' }] } }],
       ['target.version', { target: { kind: 'package-file', pkg: PKG, path: 'lib/client.js' }, op: OPS.code }],
     ]
     for (const [field, override] of cases) {

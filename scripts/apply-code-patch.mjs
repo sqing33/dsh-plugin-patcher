@@ -17,9 +17,19 @@
 // the host adapter on purpose: this script has to run outside a built host,
 // and test/apply-code-patch.test.ts asserts the two agree.
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, resolve as resolvePath } from 'node:path'
+import { dirname, join, resolve as resolvePath, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import process from 'node:process'
 import { parseDocument } from 'yaml'
 
@@ -35,7 +45,12 @@ function die(message) {
 }
 
 export function parseArgs(argv) {
-  const out = { profile: process.env.DSH_PROFILE ?? 'web', dryRun: false, install: false }
+  const out = {
+    profile: process.env.DSH_PROFILE ?? 'web',
+    dryRun: false,
+    install: false,
+    importSmoke: true,
+  }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const next = () => {
@@ -51,6 +66,8 @@ export function parseArgs(argv) {
     else if (arg === '--profile-dir') out.profileDir = next()
     else if (arg === '--dry-run') out.dryRun = true
     else if (arg === '--install') out.install = true
+    else if (arg === '--patcher-root') out.patcherRoot = next()
+    else if (arg === '--no-import-smoke') out.importSmoke = false
     else if (arg === '--help' || arg === '-h') out.help = true
     else die('unknown argument: ' + arg)
   }
@@ -69,6 +86,8 @@ export const HELP = [
   '  --profile-dir <dir>  profile directory; overrides --profile and --dsh-home',
   '  --dry-run            show what would change, write nothing',
   '  --install            run pnpm install afterwards so the patched copy is the one on disk',
+  '  --patcher-root <dir> package holding patches/; defaults to this script\'s own package',
+  '  --no-import-smoke    skip the load-the-result check (see the comment on importSmoke)',
 ].join('\n')
 
 /**
@@ -249,31 +268,191 @@ export function describeChange(before, after) {
   return out.join('\n')
 }
 
-function run(command, args, cwd) {
+/**
+ * Run a child process, optionally under a deadline.
+ *
+ * A deadline is not a nicety here. The one child that can legitimately hang is
+ * the import smoke, because loading a third-party module runs its top level and
+ * we do not control what that does; escalating SIGTERM to SIGKILL means a
+ * misbehaving package costs fifteen seconds instead of the run never finishing.
+ */
+function run(command, args, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
+    let timedOut = false
+    let killTimer
+    if (timeoutMs !== undefined) {
+      killTimer = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGTERM')
+        setTimeout(() => child.kill('SIGKILL'), 2000).unref()
+      }, timeoutMs)
+      killTimer.unref?.()
+    }
     child.stdout.on('data', (chunk) => {
       stdout += chunk
     })
     child.stderr.on('data', (chunk) => {
       stderr += chunk
     })
-    child.on('error', (error) => resolve({ code: -1, stdout, stderr: String(error) }))
-    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }))
+    const done = (result) => {
+      clearTimeout(killTimer)
+      resolve(result)
+    }
+    child.on('error', (error) => done({ code: -1, stdout, stderr: String(error), timedOut }))
+    child.on('close', (code) => done({ code: code ?? -1, stdout, stderr, timedOut }))
   })
 }
 
-function checkSyntax(text, path) {
+/**
+ * This script's own package root.
+ *
+ * Duplicated from src/host/defaults.ts on purpose: this process has to run
+ * from a checkout or an installed copy with nothing built, so it cannot import
+ * host code that only exists after a bundle. Both walk up to the first package.json.
+ */
+export function packageRoot(fromUrl = import.meta.url) {
+  let dir = dirname(fileURLToPath(fromUrl))
+  for (let depth = 0; depth < 8; depth++) {
+    if (existsSync(join(dir, 'package.json'))) return dir
+    const up = dirname(dir)
+    if (up === dir) return dir
+    dir = up
+  }
+  return dir
+}
+
+/**
+ * Read a source file a code patch wants to add, from inside this package.
+ *
+ * The spec already requires the reference to sit under patches/, so the
+ * containment check below is belt and braces rather than the primary guard. It
+ * is here because this process is the one that writes, and a writer that trusts
+ * a path it read from a file it does not own is a writer that can be aimed at
+ * anything on the disk.
+ */
+export function readSource(patcherRoot, ref) {
+  const root = resolvePath(patcherRoot)
+  const file = resolvePath(root, ref)
+  if (file !== root && !file.startsWith(root + sep)) {
+    return { error: 'the source reference "' + ref + '" resolves outside the patcher package' }
+  }
+  if (!existsSync(file)) {
+    return {
+      error:
+        'there is no file at patches/' + ref.replace(/^patches[\\/]/, '') + ' in ' + root +
+        '. The spec points at a file this package does not ship.',
+    }
+  }
+  return { text: readFileSync(file, 'utf8'), path: file }
+}
+
+/**
+ * Whether one whole file is already what the spec wants there.
+ *
+ * Deliberately a three-way answer rather than a boolean. A missing file and a
+ * file whose content differs are both work to do, but they are different
+ * situations for a person reading the output, and a patch that adds a file is
+ * never satisfied while that file is absent.
+ */
+export function assessFile(installed, source) {
+  if (installed === undefined) return { kind: 'missing' }
+  if (installed === source) return { kind: 'already-applied' }
+  return { kind: 'differs', installedBytes: Buffer.byteLength(installed), sourceBytes: Buffer.byteLength(source) }
+}
+
+/**
+ * Parse-check a file that is already sitting where it will be published.
+ *
+ * Checking the real path rather than a copy in a temp directory means the
+ * package.json that decides whether .js is CommonJS or ESM is the one the file
+ * will actually be judged by. A file that only parses under the wrong module
+ * system is exactly the failure this exists to catch, and copying it out of
+ * the package is what hides it.
+ */
+function checkSyntaxAt(path) {
   if (!/\.[cm]?js$/.test(path)) return Promise.resolve({ ok: true, stderr: '' })
-  const dir = mkdtempSync(join(tmpdir(), 'patcher-syntax-'))
-  const probe = join(dir, 'probe' + path.slice(path.lastIndexOf('.')))
-  writeFileSync(probe, text)
-  return run(process.execPath, ['--check', probe], dir).then((result) => {
-    rmSync(dir, { recursive: true, force: true })
-    return { ok: result.code === 0, stderr: result.stderr }
-  })
+  return run(process.execPath, ['--check', path], dirname(path)).then((result) => ({
+    ok: result.code === 0,
+    stderr: result.stderr,
+  }))
+}
+
+/** How long the load-the-result check is allowed to take. */
+export const SMOKE_TIMEOUT_MS = 15_000
+
+/**
+ * Load the patched package and see whether it holds together.
+ *
+ * node --check only proves the bytes parse. It says nothing about whether the
+ * module they belong to can be assembled: an injected import of a sibling file
+ * that never got written, or a reference to a symbol the upstream release no
+ * longer exports, both parse perfectly and fail the moment DSH loads the
+ * plugin. So the last gate before committing is loading the thing, with the
+ * profile's own node_modules laid out around it so bare imports resolve.
+ *
+ * The result is a three-way answer, and the third value is the interesting one:
+ * a package whose top level does not terminate is reported as skipped, not as
+ * a failure. We did not time out because the patch is wrong; we stopped
+ * watching, and saying otherwise would be inventing a verdict.
+ */
+export async function importSmoke(dir, pkg, profileDir) {
+  const manifestPath = join(dir, 'package.json')
+  if (!existsSync(manifestPath)) return { status: 'skipped', detail: 'the extracted copy has no package.json' }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const entry = String(manifest.main ?? 'index.js').replace(/^\.\//, '')
+  const entryFile = join(dir, entry)
+  if (!existsSync(entryFile)) {
+    return { status: 'skipped', detail: 'the package has no ' + entry + ' on disk to load' }
+  }
+
+  // Node resolves symlinks to their real path, which would put the module
+  // back in the edit directory where its dependencies are not. Laying out a
+  // node_modules of symlinks and loading through it with --preserve-symlinks
+  // makes the patched copy load exactly as it will once it is installed.
+  const probe = mkdtempSync(join(tmpdir(), 'patcher-smoke-'))
+  const modules = join(probe, 'node_modules')
+  const hostModules = join(profileDir, 'node_modules')
+  mkdirSync(modules, { recursive: true })
+  try {
+    if (existsSync(hostModules)) {
+      for (const name of readdirSync(hostModules)) {
+        if (name === pkg || name.startsWith('.')) continue
+        try {
+          symlinkSync(join(hostModules, name), join(modules, name), 'junction')
+        } catch {
+          // A name that will not link (a broken entry, a permission problem)
+          // is exactly the case the load is going to tell us about.
+        }
+      }
+    }
+    try {
+      symlinkSync(dir, join(modules, pkg), 'junction')
+    } catch (error) {
+      // Not being able to lay out the probe is not the patch failing to load.
+      // Say the check did not happen instead of dressing it up as a verdict.
+      return { status: 'skipped', detail: 'the patched copy could not be linked into a probe tree (' + error.code + ')' }
+    }
+    const result = await run(process.execPath, ['--preserve-symlinks', join(modules, pkg, entry)], probe, SMOKE_TIMEOUT_MS)
+    if (result.timedOut) {
+      return {
+        status: 'skipped',
+        detail: pkg + ' did not finish loading within ' + SMOKE_TIMEOUT_MS / 1000 + 's, so it was not judged',
+      }
+    }
+    if (result.code !== 0) {
+      return { status: 'failed', detail: (result.stderr.trim() || result.stdout.trim() || 'it exited ' + result.code) }
+    }
+    return { status: 'ok', detail: pkg + '@' + (manifest.version ?? '?') + ' loaded' }
+  } finally {
+    rmSync(probe, { recursive: true, force: true })
+  }
+}
+
+function describeNewFile(text) {
+  return text.replace(/\n$/, '').split('\n').map((line) => '+ ' + line).join('\n')
 }
 
 export async function main(argv) {
@@ -287,6 +466,7 @@ export async function main(argv) {
   const dshHome = args.dshHome ?? process.env.DSH_HOME ?? join(homedir(), '.dsh')
   const profileDir = args.profileDir ?? join(dshHome, 'profiles', args.profile)
   const specPath = args.spec ? resolvePath(args.spec) : defaultSpecPath(profileDir)
+  const patcherRoot = args.patcherRoot ? resolvePath(args.patcherRoot) : packageRoot()
 
   say('spec:   ' + specPath)
   const config = loadConfig(specPath)
@@ -305,6 +485,24 @@ export async function main(argv) {
   const target = patch.target
   if (patch.op?.kind !== 'code') {
     die('patch "' + args.patchId + '" is a ' + (patch.op?.kind ?? 'nothing') + ' operation, not a code edit.')
+  }
+
+  // Specs written before a code patch could add files have no files key at all,
+  // so both lists are read defensively rather than assuming the current shape.
+  const edits = Array.isArray(patch.op.edits) ? patch.op.edits : []
+  const addedFiles = (Array.isArray(patch.op.files) ? patch.op.files : []).filter(
+    (entry) => typeof entry?.path === 'string' && typeof entry?.source === 'string',
+  )
+  if (edits.length === 0 && addedFiles.length === 0) {
+    die('patch "' + args.patchId + '" has neither edits nor files, so it would not change anything.')
+  }
+  for (const entry of addedFiles) {
+    if (entry.path === target.path) {
+      die(
+        entry.path + ' is both the target path and an added file. Which of the two wins would be a' +
+        ' property of the order they happen to be listed in, so the spec has to pick one.',
+      )
+    }
   }
   if (args.pkg !== undefined && args.pkg !== target.pkg) {
     die('patch "' + args.patchId + '" targets ' + target.pkg + ', not ' + args.pkg + '.')
@@ -325,31 +523,64 @@ export async function main(argv) {
       '. Rewrite the spec for the version you are running.',
     )
   }
-  say('target: ' + target.pkg + '@' + installed + ' :: ' + target.path)
+  say(
+    'target: ' + target.pkg + '@' + installed + ' :: ' + target.path +
+    (edits.length === 0 ? '  (read only; this patch adds files)' : ''),
+  )
 
-  // Look at what is installed before reaching for pnpm. This is the common
-  // case after a successful run, and answering it here keeps a second run from
-  // extracting a whole package to discover there is nothing to do.
-  const installedFile = join(profileDir, 'node_modules', target.pkg, target.path)
+  const packageDir = join(profileDir, 'node_modules', target.pkg)
+  const installedFile = join(packageDir, target.path)
   if (!existsSync(installedFile)) {
     die(target.pkg + ' has no file at ' + target.path + '. Nothing was written.')
   }
   const installedText = readFileSync(installedFile, 'utf8')
-  const installedVerdict = assessEdits(installedText, patch.op.edits)
-  if (installedVerdict.kind === 'already-applied') {
+
+  // What the spec wants added, read out of this package. Reading it before the
+  // idempotency check is deliberate: a spec that points at a source file this
+  // package does not ship has to fail by saying so, not by cheerfully
+  // reporting that there is nothing left to do.
+  const sources = addedFiles.map((entry) => ({ path: entry.path, ref: entry.source, ...readSource(patcherRoot, entry.source) }))
+  for (const source of sources) {
+    if (source.error !== undefined) die('patch "' + args.patchId + '": ' + source.error)
+  }
+
+  // Look at what is installed before reaching for pnpm. This is the common
+  // case after a successful run, and answering it here keeps a second run from
+  // extracting a whole package to discover there is nothing to do.
+  const pending = []
+  if (edits.length > 0) {
+    const verdict = assessEdits(installedText, edits)
+    if (verdict.kind === 'partial') {
+      die(
+        'only ' + verdict.applied + ' of ' + verdict.total +
+        ' edits are in ' + installedFile + '. Re-running would rewrite the ones that are not; apply the rest by hand.',
+      )
+    }
+    if (verdict.kind === 'applicable') {
+      pending.push(target.path + '  (' + edits.length + ' edits)')
+    } else if (verdict.kind !== 'already-applied') {
+      die('the installed file is not what this spec targets: ' + whyNot(installedText, edits))
+    }
+  }
+  for (const source of sources) {
+    const onDisk = join(packageDir, source.path)
+    const verdict = assessFile(existsSync(onDisk) ? readFileSync(onDisk, 'utf8') : undefined, source.text)
+    if (verdict.kind === 'missing') {
+      pending.push(source.path + '  (new file, ' + source.ref + ')')
+    } else if (verdict.kind === 'differs') {
+      pending.push(
+        source.path + '  (replacing ' + verdict.installedBytes + ' bytes on disk with ' + verdict.sourceBytes + ' from ' + source.ref + ')',
+      )
+    }
+  }
+  if (pending.length === 0) {
     say('')
     say(target.pkg + '@' + installed + ' already carries this change. Nothing to do.')
     return 0
   }
-  if (installedVerdict.kind === 'partial') {
-    die(
-      'only ' + installedVerdict.applied + ' of ' + installedVerdict.total +
-      ' edits are in ' + installedFile + '. Re-running would rewrite the ones that are not; apply the rest by hand.',
-    )
-  }
-  if (installedVerdict.kind === 'no-match' || installedVerdict.kind === 'many-matches' || installedVerdict.kind === 'empty-find') {
-    die('the installed file is not what this spec targets: ' + whyNot(installedText, patch.op.edits))
-  }
+  say('')
+  say('to apply:')
+  for (const line of pending) say('  ' + line)
 
   // pnpm extracts into a deterministic directory and refuses to reuse a
   // non-empty one, so a run that died before patch-commit leaves a directory
@@ -382,31 +613,60 @@ export async function main(argv) {
   const before = readFileSync(file, 'utf8')
   // Re-check the extracted copy rather than trusting the installed one: pnpm
   // materialises the edit dir from the store, which is the pristine package.
-  const refusal = whyNot(before, patch.op.edits)
+  const refusal = edits.length > 0 ? whyNot(before, edits) : undefined
   if (refusal !== undefined) {
     rmSync(dir, { recursive: true, force: true })
     die(refusal)
   }
-  const after = applyEdits(before, patch.op.edits)
 
-  const syntax = await checkSyntax(after, target.path)
-  if (!syntax.ok) {
-    process.stderr.write(syntax.stderr)
-    rmSync(dir, { recursive: true, force: true })
-    die('the patched file does not parse. Nothing was written.')
+  // Everything this patch writes lands in the edit directory first. Nothing has
+  // touched the installed package at this point, and nothing will unless all of
+  // it clears the checks below, so a failure anywhere from here down is still a
+  // run that wrote nothing.
+  const written = []
+  if (edits.length > 0) {
+    const after = applyEdits(before, edits)
+    writeFileSync(file, after)
+    written.push({ path: target.path, before, after })
+  }
+  for (const source of sources) {
+    const destination = join(dir, source.path)
+    const previous = existsSync(destination) ? readFileSync(destination, 'utf8') : undefined
+    mkdirSync(dirname(destination), { recursive: true })
+    writeFileSync(destination, source.text)
+    written.push({ path: source.path, before: previous, after: source.text })
+  }
+
+  for (const entry of written) {
+    const syntax = await checkSyntaxAt(join(dir, entry.path))
+    if (!syntax.ok) {
+      process.stderr.write(syntax.stderr)
+      rmSync(dir, { recursive: true, force: true })
+      die(entry.path + ' does not parse. Nothing was written.')
+    }
+  }
+
+  if (args.importSmoke) {
+    const smoke = await importSmoke(dir, target.pkg, profileDir)
+    if (smoke.status === 'failed') {
+      process.stderr.write(smoke.detail + '\n')
+      rmSync(dir, { recursive: true, force: true })
+      die('the patched package does not load. Nothing was written.')
+    }
+    say('load:   ' + (smoke.status === 'ok' ? smoke.detail : 'skipped, ' + smoke.detail))
   }
 
   if (args.dryRun) {
     say('')
-    say('--- ' + target.pkg + '@' + installed + ' :: ' + target.path + ' ---')
-    say(describeChange(before, after))
-    say('')
+    for (const entry of written) {
+      say('--- ' + target.pkg + '@' + installed + ' :: ' + entry.path + ' ---')
+      say(entry.before === undefined ? describeNewFile(entry.after) : describeChange(entry.before, entry.after))
+      say('')
+    }
     say('--dry-run: nothing was written.')
     rmSync(dir, { recursive: true, force: true })
     return 0
   }
-
-  writeFileSync(file, after)
 
   const commit = await run('pnpm', ['patch-commit', dir], profileDir)
   if (commit.code !== 0) {
@@ -426,7 +686,7 @@ export async function main(argv) {
   }
 
   say('')
-  say('patched ' + key + ' (' + target.path + ').')
+  say('patched ' + key + ' (' + written.map((entry) => entry.path).join(', ') + ').')
 
   // patch-commit only writes the patch file and registers it. The copy that
   // is actually installed stays untouched until something installs, so

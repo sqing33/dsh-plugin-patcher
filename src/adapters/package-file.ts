@@ -1,5 +1,5 @@
 import type { ApplyResult, Adapter, TargetSnapshot } from './types.ts'
-import type { CodeEdit, PackageFileTarget, Patch } from '../spec/types.ts'
+import type { CodeEdit, CodeOp, PackageFileTarget, Patch, SourceFile } from '../spec/types.ts'
 
 /**
  * The third target layer: a file inside an installed package.
@@ -22,6 +22,12 @@ import type { CodeEdit, PackageFileTarget, Patch } from '../spec/types.ts'
  * process that does the whole pnpm-patch dance — extract, edit, syntax-check,
  * commit the patch file, register it in pnpm-workspace.yaml — and refuses to
  * do any of it unless it is the patch the spec named.
+ *
+ * A file a code op declares changes nothing about that. It is the same
+ * question asked about a path that may not exist yet: is what is installed
+ * byte-for-byte what this patch would write? The host still only reads, and
+ * the same script still does the writing, under the same lock, for the same
+ * reasons.
  */
 export interface PackageFilePort {
   /** Installed version of a package, or undefined when it is not installed. */
@@ -29,6 +35,23 @@ export interface PackageFilePort {
   /** Absolute path of a file inside an installed package, or undefined. */
   locate(pkg: string, path: string): string | undefined
   readFile(file: string): string
+  /**
+   * Contents of a file in *this* plugin's own package, addressed by a
+   * SourceFile `source` ref: relative to this package root, under patches/.
+   *
+   * Kept apart from readFile because the two reach opposite sides of the
+   * fence. readFile is handed an absolute path inside a package this plugin
+   * has already vetted; readSource is handed a spec-supplied relative ref
+   * inside this plugin's own tree. The adapter needs the second to know what
+   * a declared file should look like, and a port that can only read the first
+   * cannot answer it.
+   */
+  readSource(ref: string): string
+}
+
+/** The message of a throw, whatever it was. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** Occurrences of `needle`, or -1 for the empty needle that matches everywhere. */
@@ -138,7 +161,19 @@ function firstLine(text: string): string {
   return '"' + (line.length > 60 ? line.slice(0, 57) + '..."' : line) + '"'
 }
 
-export function describeProblem(problem: EditVerdict): string {
+/**
+ * A file the op declares could not be read, as opposed to not matching.
+ *
+ * These are failures rather than drifts because the CLI cannot do anything
+ * with them either: it copies the same source into the same place, so a spec
+ * pointing at a source that is not there, or a destination that cannot be
+ * read, is a problem to fix in the spec rather than a command to run.
+ */
+export type FileProblem =
+  | { kind: 'unreadable-source'; ref: string; reason: string }
+  | { kind: 'unreadable-file'; path: string; reason: string }
+
+export function describeProblem(problem: EditVerdict | FileProblem): string {
   if (problem.kind === 'empty-find') {
     return 'an edit has an empty find, which would match everywhere'
   }
@@ -156,13 +191,122 @@ export function describeProblem(problem: EditVerdict): string {
       ' times; this patch replaces exactly one occurrence, so the spec has to say which one rather than letting the first win'
     )
   }
-  return (
-    'only ' +
-    problem.applied +
-    ' of ' +
-    problem.total +
-    ' edits are already in the file. Re-running would rewrite the ones that are not; apply the rest by hand'
-  )
+  if (problem.kind === 'partial') {
+    return (
+      'only ' +
+      problem.applied +
+      ' of ' +
+      problem.total +
+      ' edits are already in the file. Re-running would rewrite the ones that are not; apply the rest by hand'
+    )
+  }
+  if (problem.kind === 'unreadable-source') {
+    return 'cannot read the source file ' + problem.ref + ': ' + problem.reason
+  }
+  if (problem.kind === 'unreadable-file') {
+    return 'cannot read ' + problem.path + ' in the package: ' + problem.reason
+  }
+  return 'the change is not needed here'
+}
+
+/**
+ * How one declared file compares with the source it is copied from.
+ *
+ * Byte-for-byte and nothing softer. A declared file has no upstream to diff
+ * against and no other patcher is expected to be editing it, so the only
+ * question worth answering is whether running the patch again would change a
+ * single byte — and a trailing-newline or line-ending difference is exactly
+ * as real as a rewritten function.
+ */
+export function fileVerdict(installed: string | undefined, source: string): 'present' | 'missing' | 'differs' {
+  if (installed === void 0) return 'missing'
+  return installed === source ? 'present' : 'differs'
+}
+
+/**
+ * The content behind a SourceFile ref.
+ *
+ * The check is for a port that cannot answer the question at all, which is a
+ * host that has not been given the ability to see its own files. Saying that
+ * in a status detail beats letting a bare TypeError out into one, because the
+ * detail is the only thing the operator is shown.
+ */
+function readSourceText(port: PackageFilePort, ref: string): string {
+  if (typeof port.readSource !== 'function') {
+    throw new Error('this host cannot read its own source files, so ' + ref + ' is out of reach')
+  }
+  return port.readSource(ref)
+}
+
+/**
+ * What the declared files would do, judged without writing anything.
+ *
+ * `differs` is drifted and never a conflict, and that is the point of the
+ * whole `files` feature. A declared file belongs to this patch: the spec
+ * names its destination and its content lives in this repository under
+ * patches/. So "what is installed is not what I wrote" is the ordinary state
+ * of a patch that has not been run yet, and of the iteration where the author
+ * edits the source and runs it again. Calling that a conflict would report a
+ * third-party hand intervention on every pass of the normal loop, and refuse
+ * to leave the operator any way to say it was them. Overwriting is the right
+ * move in both cases; the honest answer to "is this in sync" is no.
+ *
+ * The same reasoning does not extend to the edits, where a find that misses
+ * means the installed build is not the one the spec was written against, and
+ * rewriting the wrong file is worse than refusing to.
+ */
+function assessFiles(
+  port: PackageFilePort,
+  target: PackageFileTarget,
+  declared: readonly SourceFile[],
+): { problem: FileProblem } | { drift: string[]; matched: string[] } {
+  const drift: string[] = []
+  const matched: string[] = []
+  for (const file of declared) {
+    let source: string
+    try {
+      source = readSourceText(port, file.source)
+    } catch (error) {
+      return { problem: { kind: 'unreadable-source', ref: file.source, reason: messageOf(error) } }
+    }
+    const at = port.locate(target.pkg, file.path)
+    if (at === void 0) {
+      drift.push(file.path + ' is not in the package yet')
+      continue
+    }
+    let contents: string
+    try {
+      contents = port.readFile(at)
+    } catch (error) {
+      return { problem: { kind: 'unreadable-file', path: file.path, reason: messageOf(error) } }
+    }
+    if (fileVerdict(contents, source) === 'present') {
+      matched.push(file.path)
+      continue
+    }
+    // Both sizes, so the overwrite is visible rather than implied. "It
+    // differs" reads like a rounding error; 120 bytes against 4 200 is a
+    // different file, and the operator is the one who has to decide that is
+    // what they meant.
+    drift.push(
+      file.path +
+        ' does not match ' +
+        file.source +
+        ': ' +
+        Buffer.byteLength(contents, 'utf8') +
+        ' bytes installed, ' +
+        Buffer.byteLength(source, 'utf8') +
+        ' bytes in the source',
+    )
+  }
+  return { drift, matched }
+}
+
+/** What to say when there is nothing left for the operator to do. */
+function inSyncDetail(matched: readonly string[]): string {
+  if (matched.length === 0) return 'the file already carries this change'
+  if (matched.length === 1) return 'the file already carries this change, and ' + matched[0] + ' matches its source'
+  return 'the file already carries this change, and all ' + matched.length + ' added files match their sources'
 }
 
 /** The text the edits would produce, or undefined when they do not apply. */
@@ -181,8 +325,8 @@ function targetOf(patch: Patch): PackageFileTarget {
   return patch.target
 }
 
-function editsOf(patch: Patch): readonly CodeEdit[] {
-  if (patch.op.kind === 'code') return patch.op.edits
+function codeOf(patch: Patch): CodeOp {
+  if (patch.op.kind === 'code') return patch.op
   throw new Error('"' + patch.op.kind + '" is not a package-file operation')
 }
 
@@ -199,11 +343,11 @@ export function cliCommand(patch: Patch, target: PackageFileTarget): string {
 
 function readPackageFile(port: PackageFilePort, patch: Patch): TargetSnapshot {
   const target = targetOf(patch)
-  let edits: readonly CodeEdit[]
+  let op: CodeOp
   try {
-    edits = editsOf(patch)
+    op = codeOf(patch)
   } catch (error) {
-    return { state: 'failed', value: void 0, detail: error instanceof Error ? error.message : String(error) }
+    return { state: 'failed', value: void 0, detail: messageOf(error) }
   }
 
   const installed = port.version(target.pkg)
@@ -230,27 +374,47 @@ function readPackageFile(port: PackageFilePort, patch: Patch): TargetSnapshot {
   try {
     text = port.readFile(file)
   } catch (error) {
-    return { state: 'failed', value: void 0, detail: error instanceof Error ? error.message : String(error) }
+    return { state: 'failed', value: void 0, detail: messageOf(error) }
   }
 
-  const verdict = assessEdits(text, edits)
-  if (verdict.kind === 'already-applied') {
-    return { state: 'in-sync', value: void 0, detail: 'the file already carries this change' }
-  }
-  if (verdict.kind === 'applicable') {
-    return {
-      state: 'drifted',
-      value: void 0,
-      detail: 'the file does not carry this change yet; run ' + cliCommand(patch, target),
-    }
-  }
-  if (verdict.kind === 'partial') {
+  const verdict = assessEdits(text, op.edits)
+
+  // A conflict is the only answer the operator has to fix by hand, and it is
+  // about the edits. So it is also the one that is given the detail to itself:
+  // until the find matches, there is no honest comparison to make of the
+  // declared files, and a detail carrying both would bury the first problem
+  // under the second.
+  if (verdict.kind === 'empty-find' || verdict.kind === 'many-matches' || verdict.kind === 'partial') {
     return { state: 'conflict', value: void 0, detail: describeProblem(verdict) }
   }
+
+  // `files` is required by the type and defaulted by the schema, but a spec
+  // stored before code ops could add files has no such key at all, and stored
+  // specs outlive the schema that validates them.
+  const declared: readonly SourceFile[] = op.files ?? []
+  const files = assessFiles(port, target, declared)
+  if ('problem' in files) {
+    return { state: 'failed', value: void 0, detail: describeProblem(files.problem) }
+  }
+
+  const reasons: string[] = []
+  if (verdict.kind === 'applicable') {
+    reasons.push('the file does not carry this change yet')
+  } else if (verdict.kind === 'no-match') {
+    // Deliberately not followed by a command: the script refuses an edit that
+    // matches zero times, so pointing at it would only make the operator run
+    // something that reports the same sentence back at them.
+    reasons.push(describeProblem(verdict))
+  }
+  reasons.push(...files.drift)
+
+  if (reasons.length === 0) {
+    return { state: 'in-sync', value: void 0, detail: inSyncDetail(files.matched) }
+  }
   return {
-    state: verdict.kind === 'no-match' ? 'drifted' : 'conflict',
+    state: 'drifted',
     value: void 0,
-    detail: describeProblem(verdict),
+    detail: reasons.join('; ') + (verdict.kind === 'no-match' ? '' : '; run ' + cliCommand(patch, target)),
   }
 }
 
@@ -261,7 +425,10 @@ export const packageFileAdapter: Adapter<PackageFilePort, PackageFileTarget> = {
   async apply(_port, patch): Promise<ApplyResult> {
     return {
       state: 'unsupported',
-      detail: 'the host never rewrites an installed package; run ' + cliCommand(patch, targetOf(patch)) + ' to apply it',
+      detail:
+        'the host neither rewrites nor adds files inside an installed package; run ' +
+        cliCommand(patch, targetOf(patch)) +
+        ' to apply it',
       before: void 0,
     }
   },
@@ -269,7 +436,9 @@ export const packageFileAdapter: Adapter<PackageFilePort, PackageFileTarget> = {
   async rollback(_port, patch): Promise<ApplyResult> {
     return {
       state: 'unsupported',
-      detail: 'the host never rewrites an installed package; undoing this one is ' + cliCommand(patch, targetOf(patch)),
+      detail:
+        'the host neither rewrites nor adds files inside an installed package; undoing this one is ' +
+        cliCommand(patch, targetOf(patch)),
     }
   },
 }

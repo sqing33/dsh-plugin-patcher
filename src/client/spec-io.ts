@@ -397,11 +397,38 @@ export function validateDraft(
         return 'op.config is empty: a merge with nothing would rewrite the row for no reason'
       }
       break
-    case 'code':
-      if (draft.op.edits.length === 0) {
-        return 'op.edits is empty: a code patch with no edits would rewrite the file for no reason'
+    case 'code': {
+      // A code patch says what to do in two lists: edits to the target file,
+      // and files to add beside it. Adding a file is how injected code stays a
+      // file an editor can open and a linter can read, so a patch carrying only
+      // `files` is the interesting case, not a half-typed one. The rule here
+      // is the host's rule in src/spec/resolve.ts — both lists empty is the
+      // only thing that does nothing — and reading `files` defensively is what
+      // lets a draft from a hand-edited spec, or from before this field
+      // existed, reach the same conclusion the host would.
+      const edits = Array.isArray(draft.op.edits) ? draft.op.edits : []
+      const files = Array.isArray(draft.op.files) ? draft.op.files : []
+      if (edits.length === 0 && files.length === 0) {
+        return 'op.edits and op.files are both empty: a code patch would change nothing'
+      }
+      const seen = new Set<string>()
+      for (const file of files) {
+        if (typeof file?.path !== 'string' || file.path === '') {
+          return 'op.files[].path is required: it is the file to create inside the target package'
+        }
+        if (typeof file.source !== 'string' || file.source === '') {
+          return `op.files entry "${file.path}" has no source: the content of injected code lives in a file under patches/, not in the spec`
+        }
+        if (seen.has(file.path)) {
+          return `op.files lists "${file.path}" twice: only one of them could win, and which one would be the order of the array`
+        }
+        seen.add(file.path)
+        if (file.path === (draft.target.kind === 'package-file' ? draft.target.path : '')) {
+          return `op.files would overwrite the target file itself ("${file.path}"); an edit and a file competing for one path has no defined winner`
+        }
       }
       break
+    }
     case 'set-enabled':
     case 'verify-only':
       break

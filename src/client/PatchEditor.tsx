@@ -36,6 +36,13 @@ interface Draft {
   configText: string
   rowEnabled: boolean
   edits: Array<{ find: string; replace: string }>
+  /**
+   * Files to add inside the target package, each a path and a reference into
+   * this plugin's own patches/ directory. The form edits the reference, not the
+   * content: content that lives in a settings text box is a file nobody can
+   * open, diff or lint, which is the whole reason this list exists.
+   */
+  files: Array<{ path: string; source: string }>
 }
 
 function emptyDraft(state: PatcherState, seed?: Target): Draft {
@@ -57,6 +64,7 @@ function emptyDraft(state: PatcherState, seed?: Target): Draft {
     configText: '{}',
     rowEnabled: true,
     edits: [{ find: '', replace: '' }],
+    files: [],
   }
 }
 
@@ -79,6 +87,7 @@ function draftOf(patch: Patch): Draft {
     configText: '{}',
     rowEnabled: true,
     edits: [],
+    files: [],
   }
   if (patch.target.kind === 'settings') base.namespace = patch.target.namespace
   if (patch.target.kind === 'patch-row') {
@@ -98,7 +107,13 @@ function draftOf(patch: Patch): Draft {
   if (op.kind === 'unset') base.valuePath = op.path.join(',')
   if (op.kind === 'merge-config') base.configText = JSON.stringify(op.config, null, 2)
   if (op.kind === 'set-enabled') base.rowEnabled = op.enabled
-  if (op.kind === 'code') base.edits = op.edits.map((edit) => ({ find: edit.find, replace: edit.replace }))
+  if (op.kind === 'code') {
+    base.edits = op.edits.map((edit) => ({ find: edit.find, replace: edit.replace }))
+    // A spec that predates the files field, or one an operator hand-edited, has
+    // no such array. Reading it defensively is what keeps this form able to open
+    // that patch and save it back rather than throwing inside a render.
+    base.files = (Array.isArray(op.files) ? op.files : []).map((file) => ({ path: file.path, source: file.source }))
+  }
   void draft
   return base
 }
@@ -147,11 +162,20 @@ function opOf(draft: Draft): { op?: Op; error?: string } {
   }
   if (draft.opKind === 'set-enabled') return { op: { kind: 'set-enabled', enabled: draft.rowEnabled } }
   if (draft.opKind === 'verify-only') return { op: { kind: 'verify-only' } }
+  // A code patch is two lists, and either one alone is a real patch: edits to
+  // the target file, and files to add beside it. Only a patch with both empty
+  // would rewrite the target for nothing, and that is the one case the host
+  // rejects, so the form must not invent an op the host will refuse.
   const edits = draft.edits
     .filter((edit) => edit.find !== '')
     .map((edit) => ({ find: edit.find, replace: edit.replace, count: 1 as const }))
-  if (edits.length === 0) return { error: 'a code patch needs at least one edit' }
-  return { op: { kind: 'code', edits } }
+  const files = draft.files
+    .filter((file) => file.path !== '' || file.source !== '')
+    .map((file) => ({ path: file.path.trim(), source: file.source.trim() }))
+  if (edits.length === 0 && files.length === 0) {
+    return { error: 'a code patch needs at least one edit or one file' }
+  }
+  return { op: { kind: 'code', edits, files } }
 }
 
 export function PatchEditor({ t, state, initial, seed, onSave, onCancel }: EditorProps): React.ReactElement {
@@ -376,6 +400,49 @@ export function PatchEditor({ t, state, initial, seed, onSave, onCancel }: Edito
               onClick={() => setDraft((current) => ({ ...current, edits: [...current.edits, { find: '', replace: '' }] }))}
             >
               {t('field.addEdit')}
+            </button>
+            <span className="pp__label">{t('op.codeFiles')}</span>
+            <p className="pp__hint">{t('field.codeFilesHint')}</p>
+            {draft.files.map((file, index) => (
+              <div className="pp__grid" key={index}>
+                <label className="pp__field">
+                  <span className="pp__label">{t('field.filePath')}</span>
+                  <input
+                    className="pp__input"
+                    placeholder="lib/force-effort-tiers.js"
+                    value={file.path}
+                    onChange={(event) =>
+                      setDraft((current) => {
+                        const files = [...current.files]
+                        files[index] = { ...files[index]!, path: event.target.value }
+                        return { ...current, files }
+                      })
+                    }
+                  />
+                </label>
+                <label className="pp__field">
+                  <span className="pp__label">{t('field.fileSource')}</span>
+                  <input
+                    className="pp__input"
+                    placeholder="patches/dsh-reasoning-effort/lib/force-effort-tiers.js"
+                    value={file.source}
+                    onChange={(event) =>
+                      setDraft((current) => {
+                        const files = [...current.files]
+                        files[index] = { ...files[index]!, source: event.target.value }
+                        return { ...current, files }
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="pp__btn"
+              onClick={() => setDraft((current) => ({ ...current, files: [...current.files, { path: '', source: '' }] }))}
+            >
+              {t('field.addFile')}
             </button>
           </div>
         )}

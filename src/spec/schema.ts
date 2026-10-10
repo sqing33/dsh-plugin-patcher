@@ -35,7 +35,7 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { PACKAGE_PATH_PATTERN, PATCH_ID_PATTERN } from './types.ts'
+import { PACKAGE_PATH_PATTERN, PATCH_ID_PATTERN, SOURCE_PATTERN } from './types.ts'
 
 /** Accepts any JSON. The `$gen` shape is discriminated in code, not here. */
 const jsonValue = z.any()
@@ -49,6 +49,22 @@ const codeEdit = z.object({
   find: z.string().min(1).required().description('Exact text to find. A literal, never a pattern.'),
   replace: z.string().required().description('Replacement text.'),
   count: z.const(1 as const).required().description('Occurrences to require. Always 1.'),
+})
+
+/**
+ * One file a code patch adds, with its content kept as a real file in this
+ * package rather than escaped into the spec.
+ *
+ * Both fields are `.required()` for the reason in the header: a `files` entry
+ * that is missing its `path` would otherwise parse into an entry that writes
+ * nowhere, and one missing its `source` into an entry with nothing to copy.
+ * `path` cannot block `..` (see hasTraversal in types.ts) and `source` cannot
+ * block `..` at all while still allowing a nested `patches/pkg/x.js`, so both
+ * are checked a second time in src/spec/resolve.ts.
+ */
+const sourceFile = z.object({
+  path: z.string().pattern(PACKAGE_PATH_PATTERN).required().description('Package-relative destination inside the patched package.'),
+  source: z.string().pattern(SOURCE_PATTERN).required().description('Where the content lives: relative to this package root, under patches/.'),
 })
 
 const settingsTarget = z.object({
@@ -99,6 +115,12 @@ const op = z.union([
   z.object({
     kind: z.const('code' as const).required(),
     edits: z.array(codeEdit).required(),
+    // `.default([])`, not `.required()`: every spec written before files
+    // existed is still a valid spec, and a required key would turn this
+    // extension into a breaking change for each of them. The `edits` above
+    // stays required, because a spec carrying neither list is refused by
+    // src/spec/resolve.ts rather than here.
+    files: z.array(sourceFile).default([]),
   }),
   z.object({ kind: z.const('verify-only' as const).required() }),
 ])

@@ -89,13 +89,14 @@ test('packageRootFrom', async (t) => {
 })
 
 test('loadDefaultPatches', async (t) => {
-  await t.test('reads the three hand-edits this profile actually carries', () => {
+  await t.test('reads every hand-edit this profile actually carries', () => {
     const { patches, problems } = loadDefaultPatches()
     assert.deepEqual(problems, [])
     assert.deepEqual(patches.map((patch) => patch.id), [
       'plan-build-switch-command-arity',
       'subagent-roles-configforms',
       'think-translate-icons-and-seat',
+      'reasoning-effort-force-effort-tiers',
     ])
     // Each one must name the package it is about; a default that lost its target
     // would report a state nobody can act on.
@@ -110,7 +111,7 @@ test('loadDefaultPatches', async (t) => {
     const { patches, problems } = loadDefaultPatches((name) =>
       name === 'think-translate-icons-and-seat.json' ? undefined : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 2)
+    assert.equal(patches.length, 3)
     assert.match(problems[0] ?? '', /think-translate-icons-and-seat\.json is missing/)
   })
 
@@ -118,7 +119,7 @@ test('loadDefaultPatches', async (t) => {
     const { patches, problems } = loadDefaultPatches((name) =>
       name === 'subagent-roles-configforms.json' ? spec({ id: 'no-reason' }) : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 2)
+    assert.equal(patches.length, 3)
     assert.match(problems[0] ?? '', /subagent-roles-configforms\.json did not load/)
   })
 
@@ -126,7 +127,7 @@ test('loadDefaultPatches', async (t) => {
     const { patches, problems } = loadDefaultPatches((name) =>
       name === 'plan-build-switch-command-arity.json' ? '{oops' : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 2)
+    assert.equal(patches.length, 3)
     assert.match(problems[0] ?? '', /is not valid JSON/)
   })
 
@@ -147,7 +148,7 @@ test('loadDefaultPatches', async (t) => {
         ? spec(codePatch('one'), codePatch('two'))
         : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 4)
+    assert.equal(patches.length, 5)
   })
 
   await t.test('reads a real examples directory off disk', () => {

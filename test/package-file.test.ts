@@ -7,10 +7,11 @@ import {
   cliCommand,
   describeProblem,
   editProblems,
+  fileVerdict,
   packageFileAdapter,
   type PackageFilePort,
 } from '../src/adapters/package-file.ts'
-import type { CodeEdit, Patch } from '../src/spec/types.ts'
+import type { CodeEdit, CodeOp, Patch, SourceFile } from '../src/spec/types.ts'
 
 const SOURCE = [
   "'use strict';",
@@ -38,13 +39,65 @@ function patch(over: Partial<Patch> = {}): Patch {
   } as Patch
 }
 
+/**
+ * The content a code op declares, as it lives in this plugin's own package.
+ *
+ * Non-ASCII on purpose: 36 characters, 48 bytes, so a detail that counted
+ * code units instead of bytes cannot pass for one that did not.
+ */
+const EXTRA = "export const extra = () => '需要一个补丁'\n"
+
+/** The one file the tests below declare. */
+const EXTRA_FILE: SourceFile = { path: 'lib/extra.js', source: 'patches/demo/extra.js' }
+
+/** Where each package-relative path would live once installed. */
+const INSTALLED_AT: Record<string, string> = {
+  'index.js': '/demo/index.js',
+  'lib/extra.js': '/demo/lib/extra.js',
+}
+
+/** What those paths hold, with the declared file already written. */
+const INSTALLED: Record<string, string> = {
+  '/demo/index.js': SOURCE,
+  '/demo/lib/extra.js': EXTRA,
+}
+
 function port(over: Partial<PackageFilePort> = {}): PackageFilePort {
   return {
     version: () => '1.0.0',
     locate: () => '/demo/index.js',
     readFile: () => SOURCE,
+    readSource: () => EXTRA,
     ...over,
   }
+}
+
+/** What an older, hand-edited copy of the declared file holds. */
+const STALE = 'const stale = 1\n'
+
+/** A port that knows the target file and the one file a code op declares. */
+function filesPort(over: Partial<PackageFilePort> = {}): PackageFilePort {
+  return port({
+    readSource: () => EXTRA,
+    locate: (_pkg, path) => INSTALLED_AT[path],
+    readFile: (file) => INSTALLED[file],
+    ...over,
+  })
+}
+
+function codePatch(edits: readonly CodeEdit[] = [edit()], files: SourceFile[] = [EXTRA_FILE]): Patch {
+  return patch({ op: { kind: 'code', edits: [...edits], files } })
+}
+
+/**
+ * A code op from before ops could add files: the key is absent, not empty.
+ *
+ * The schema defaults it, but a spec that was typed, stored and read back
+ * before the key existed never went through that schema, and the host reads
+ * what is stored.
+ */
+function legacyPatch(over: Partial<Patch> = {}): Patch {
+  return patch({ op: { kind: 'code', edits: [edit()] } as CodeOp, ...over })
 }
 
 describe('assessEdits', () => {
@@ -149,6 +202,16 @@ describe('describeProblem', () => {
     const text = describeProblem(assessEdits(SOURCE, [edit({ find: long })]))
     assert.ok(!text.includes(long), 'the whole needle should not be echoed back')
     assert.ok(text.length < 250)
+  })
+
+  it('names the source ref when a declared file has nothing to copy from', () => {
+    const text = describeProblem({ kind: 'unreadable-source', ref: 'patches/demo/extra.js', reason: 'ENOENT' })
+    assert.match(text, /cannot read the source file patches\/demo\/extra\.js: ENOENT/)
+  })
+
+  it('names the destination when a declared file cannot be read', () => {
+    const text = describeProblem({ kind: 'unreadable-file', path: 'lib/extra.js', reason: 'EISDIR' })
+    assert.match(text, /cannot read lib\/extra\.js in the package: EISDIR/)
   })
 })
 
@@ -290,5 +353,210 @@ describe('assessEdits: edits that insert', () => {
       applied: 1,
       total: 2,
     })
+  })
+})
+
+describe('fileVerdict', () => {
+  it('calls a file that is not installed missing', () => {
+    assert.equal(fileVerdict(undefined, EXTRA), 'missing')
+  })
+
+  it('calls identical contents present, two empty ones included', () => {
+    assert.equal(fileVerdict(EXTRA, EXTRA), 'present')
+    assert.equal(fileVerdict('', ''), 'present')
+  })
+
+  it('calls everything else differs, down to one trailing newline', () => {
+    assert.equal(fileVerdict(EXTRA + '\n', EXTRA), 'differs')
+    assert.equal(fileVerdict(EXTRA.trim(), EXTRA), 'differs')
+  })
+})
+
+describe('read: files a code op adds', () => {
+  it('says in-sync once the edits landed and every declared file matches', () => {
+    const snapshot = packageFileAdapter.read(
+      filesPort({ readFile: (file) => (file === '/demo/index.js' ? PATCHED : INSTALLED[file]) }),
+      codePatch(),
+    )
+    assert.equal(snapshot.state, 'in-sync')
+    assert.match(String(snapshot.detail), /lib\/extra\.js matches its source/)
+  })
+
+  it('is still drifted when every file matches but the edits have not landed', () => {
+    const snapshot = packageFileAdapter.read(filesPort(), codePatch())
+    assert.equal(snapshot.state, 'drifted')
+    assert.match(String(snapshot.detail), /does not carry this change yet/)
+    assert.match(String(snapshot.detail), /--patch-id demo --pkg demo/)
+    assert.ok(!String(snapshot.detail).includes('lib/extra.js'), 'a file that matched is not part of the drift')
+  })
+
+  it('says drifted, and which file, when a declared file is not installed yet', () => {
+    const snapshot = packageFileAdapter.read(
+      filesPort({ locate: (_pkg, path) => (path === 'lib/extra.js' ? undefined : INSTALLED_AT[path]) }),
+      codePatch(),
+    )
+    assert.equal(snapshot.state, 'drifted')
+    assert.match(String(snapshot.detail), /lib\/extra\.js is not in the package yet/)
+    assert.match(String(snapshot.detail), /apply-code-patch\.mjs/)
+  })
+
+  it('says drifted rather than conflict when an installed file is not what the source says', () => {
+    // The file is this patch's own: the spec names where it goes and the
+    // content lives in this repository. Divergence is the ordinary state of a
+    // patch that has not been run yet, or of an author who edited the source
+    // and is about to run it again. A conflict here would report a third-party
+    // hand edit on every pass of that loop, and give the operator no way to
+    // say it was them.
+    const snapshot = packageFileAdapter.read(
+      filesPort({ readFile: (file) => (file === '/demo/lib/extra.js' ? STALE : INSTALLED[file]) }),
+      codePatch(),
+    )
+    assert.equal(snapshot.state, 'drifted')
+    const detail = String(snapshot.detail)
+    assert.match(detail, /lib\/extra\.js does not match patches\/demo\/extra\.js/)
+    assert.match(detail, /--patch-id demo --pkg demo/)
+  })
+
+  it('gives both byte counts, so the overwrite is visible before it happens', () => {
+    const snapshot = packageFileAdapter.read(
+      filesPort({ readFile: (file) => (file === '/demo/lib/extra.js' ? STALE : INSTALLED[file]) }),
+      codePatch(),
+    )
+    // 16 bytes installed against 48 in the source. The source is 36 characters
+    // long, so a detail counting code units would say 36 and fail here.
+    assert.match(String(snapshot.detail), /16 bytes installed, 48 bytes in the source/)
+  })
+
+  it('reports an unreadable source as failed, naming the ref', () => {
+    const boom = (() => {
+      throw new Error('ENOENT')
+    }) as PackageFilePort['readSource']
+    const snapshot = packageFileAdapter.read(filesPort({ readSource: boom }), codePatch())
+    assert.equal(snapshot.state, 'failed')
+    assert.match(String(snapshot.detail), /cannot read the source file patches\/demo\/extra\.js/)
+    assert.match(String(snapshot.detail), /ENOENT/)
+  })
+
+  it('reports a declared file that cannot be read as failed, naming the path', () => {
+    // Running the CLI would not help: it copies into the same place, so this
+    // is a spec to fix rather than a command to print.
+    const snapshot = packageFileAdapter.read(
+      filesPort({
+        readFile: (file) => {
+          if (file === '/demo/lib/extra.js') throw new Error('EISDIR')
+          return INSTALLED[file]
+        },
+      }),
+      codePatch(),
+    )
+    assert.equal(snapshot.state, 'failed')
+    assert.match(String(snapshot.detail), /cannot read lib\/extra\.js in the package: EISDIR/)
+  })
+
+  it('answers with the conflict alone, whatever the declared files say', () => {
+    // The edits conflict, so that is the one thing the operator has to fix by
+    // hand, and it gets the detail to itself: two problems in one sentence
+    // bury the first. The files are not judged at all — there is no honest
+    // comparison to make while the find does not match — which the readSource
+    // below asserts, since it throws if it is ever reached.
+    const edits = [edit(), edit({ find: 'const SIZE = 42;' })]
+    const snapshot = packageFileAdapter.read(
+      filesPort({
+        readFile: (file) => (file === '/demo/index.js' ? PATCHED : STALE),
+        readSource: () => {
+          throw new Error('the declared files should never be consulted')
+        },
+      }),
+      codePatch(edits),
+    )
+    assert.equal(snapshot.state, 'conflict')
+    assert.match(String(snapshot.detail), /only 1 of 2 edits/)
+    assert.ok(!String(snapshot.detail).includes('lib/extra.js'))
+  })
+
+  it('judges the files for an op that declares no edits at all', () => {
+    const snapshot = packageFileAdapter.read(filesPort(), codePatch([]))
+    assert.equal(snapshot.state, 'in-sync')
+    assert.match(String(snapshot.detail), /lib\/extra\.js matches its source/)
+  })
+})
+
+describe('read: ops written before files existed', () => {
+  it('is in-sync with the same detail it always had', () => {
+    const snapshot = packageFileAdapter.read(port({ readFile: () => PATCHED }), legacyPatch())
+    assert.equal(snapshot.state, 'in-sync')
+    assert.equal(snapshot.detail, 'the file already carries this change')
+  })
+
+  it('is drifted with the same detail it always had, command and all', () => {
+    const snapshot = packageFileAdapter.read(port(), legacyPatch())
+    assert.equal(snapshot.state, 'drifted')
+    assert.equal(
+      snapshot.detail,
+      'the file does not carry this change yet; run node scripts/apply-code-patch.mjs --patch-id demo --pkg demo',
+    )
+  })
+
+  it('conflicts exactly as it did, without looking for a source', () => {
+    const snapshot = packageFileAdapter.read(
+      port({
+        readSource: () => {
+          throw new Error('no source should be read')
+        },
+      }),
+      legacyPatch({ op: { kind: 'code', edits: [edit({ find: 'const' })] } as CodeOp }),
+    )
+    assert.equal(snapshot.state, 'conflict')
+    assert.match(String(snapshot.detail), /appears 2 times/)
+  })
+
+  it('reads the same as an op that spells out files: []', () => {
+    assert.equal(
+      packageFileAdapter.read(port(), codePatch([edit()], [])).detail,
+      packageFileAdapter.read(port(), legacyPatch()).detail,
+    )
+  })
+})
+
+describe('read: the early exits ignore the declared files', () => {
+  // Each of these says something about the package the *target* names, and a
+  // file the op adds says nothing about it. The readSource that throws if it
+  // is reached is the assertion: these states are settled before any declared
+  // file is looked at, so an op that adds a file nobody can read is still
+  // reported for what it is.
+  const unreadable = (() => {
+    throw new Error('the declared files should never be consulted')
+  }) as PackageFilePort['readSource']
+
+  it('still says absent when the package is not installed', () => {
+    const snapshot = packageFileAdapter.read(filesPort({ version: () => undefined, readSource: unreadable }), codePatch())
+    assert.equal(snapshot.state, 'absent')
+    assert.match(String(snapshot.detail), /not installed in this profile/)
+  })
+
+  it('still says unsupported when the version moved on', () => {
+    const snapshot = packageFileAdapter.read(filesPort({ version: () => '1.2.0', readSource: unreadable }), codePatch())
+    assert.equal(snapshot.state, 'unsupported')
+    assert.match(String(snapshot.detail), /is at 1\.2\.0, not the 1\.0\.0/)
+  })
+
+  it('still says absent when the target file is not in the package', () => {
+    const snapshot = packageFileAdapter.read(filesPort({ locate: () => undefined, readSource: unreadable }), codePatch())
+    assert.equal(snapshot.state, 'absent')
+    assert.match(String(snapshot.detail), /has no file at index\.js/)
+  })
+})
+
+describe('read: a find that misses beside a file that differs', () => {
+  it('reports both problems, and no command, because the script would refuse one too', () => {
+    const snapshot = packageFileAdapter.read(
+      filesPort({ readFile: (file) => (file === '/demo/index.js' ? 'nothing here' : STALE) }),
+      codePatch([edit({ find: 'nowhere at all' })]),
+    )
+    assert.equal(snapshot.state, 'drifted')
+    const detail = String(snapshot.detail)
+    assert.match(detail, /not the build the spec was written against/)
+    assert.match(detail, /lib\/extra\.js does not match/)
+    assert.ok(!detail.includes('apply-code-patch.mjs'), 'the script refuses an edit that matches nothing')
   })
 })

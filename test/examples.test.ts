@@ -1,6 +1,8 @@
 
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 import { cliCommand } from '../src/adapters/package-file.ts'
@@ -14,12 +16,21 @@ import type { Patch } from '../src/spec/types.ts'
 const DIR = new URL('../examples/', import.meta.url)
 const files = readdirSync(DIR).filter((name) => name.endsWith('.json')).sort()
 
+/** The repository root, for the checks that shell out. */
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
+
+/** The path an added file's ref resolves to inside this repository. */
+function fileAt(ref: string): string {
+  return fileURLToPath(new URL('../' + ref, import.meta.url))
+}
+
 describe('the shipped examples', () => {
   it('exist', () => {
     assert.deepEqual(
       files,
       [
         'plan-build-switch-command-arity.json',
+        'reasoning-effort-force-effort-tiers.json',
         'subagent-roles-configforms.json',
         'think-translate-icons-and-seat.json',
       ],
@@ -62,6 +73,35 @@ describe('the shipped examples', () => {
         for (const edit of patch.op.kind === 'code' ? patch.op.edits : []) {
           assert.notEqual(edit.find, '')
           assert.equal(edit.count, 1)
+        }
+      })
+
+      it('points every added file at a real one that parses', () => {
+        const patch = spec.config?.patches?.[0] as Patch
+        if (patch.op.kind !== 'code') return
+        for (const file of patch.op.files) {
+          // The spec names a file, never the code itself. That only holds up if
+          // the file is really there: a ref to something missing reports as a
+          // missing target package rather than as a broken shipped example.
+          const source = readFileSync(new URL('../' + file.source, import.meta.url), 'utf8')
+          assert.notEqual(source.trim(), '', file.source + ' is empty')
+          const check = spawnSync(process.execPath, ['--check', fileAt(file.source)], { encoding: 'utf8' })
+          assert.equal(check.status, 0, file.source + ': ' + check.stderr)
+        }
+      })
+
+      it('points at a file the repository would actually commit', () => {
+        const patch = spec.config?.patches?.[0] as Patch
+        if (patch.op.kind !== 'code') return
+        for (const file of patch.op.files) {
+          // A file that exists in the working tree and is ignored by git is not
+          // shipped at all, and the spec then fails on somebody else's plugin
+          // instead of here. The unanchored `lib` that did this was a real bug,
+          // so the check asks git rather than trusting that it cannot recur.
+          const inside = spawnSync('git', ['-C', ROOT, 'check-ignore', file.source], { encoding: 'utf8' })
+          if (inside.error !== undefined && 'code' in inside.error && inside.error.code === 'ENOENT') continue
+          if (inside.error !== undefined) continue
+          assert.equal(inside.status, 1, file.source + ' is gitignored: ' + inside.stdout)
         }
       })
     })

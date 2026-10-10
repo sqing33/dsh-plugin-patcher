@@ -7,12 +7,19 @@
  * separates the two is `initialized`, and the only writer of that flag is
  * the seed below, which runs exactly once per namespace.
  *
- * The patches themselves are the files in examples/. They are the three
- * hand-edits this profile actually carries, already written as spec, and
- * they are read rather than inlined for the reason that matters most here:
- * a second copy of a 17KB list of find/replace pairs would drift from the
- * first within a week, and a stale default is worse than no default because
- * it applies an edit that no longer matches anything.
+ * The patches themselves are the files in examples/. They are the hand-edits
+ * this profile actually carries, already written as spec, and they are read
+ * rather than inlined for the reason that matters most here: a second copy of
+ * a 17KB list of find/replace pairs would drift from the first within a week,
+ * and a stale default is worse than no default because it applies an edit that
+ * no longer matches anything.
+ *
+ * One of them also names a file to add rather than a string to replace, and
+ * that file lives in patches/ beside this module's own source. The content of
+ * injected code belongs in a file an editor can open, under version control,
+ * and lint: a 150-line module escaped into a JSON string in a settings text
+ * box is unreviewable, and unreviewable is how a patch ends up rewriting the
+ * wrong file.
  */
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -30,6 +37,7 @@ export const DEFAULT_EXAMPLE_FILES: readonly string[] = [
   'plan-build-switch-command-arity.json',
   'subagent-roles-configforms.json',
   'think-translate-icons-and-seat.json',
+  'reasoning-effort-force-effort-tiers.json',
 ]
 
 /** Whether this module can still find the package it shipped with. */

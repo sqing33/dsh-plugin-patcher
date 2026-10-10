@@ -58,6 +58,11 @@ export const zh = {
     'find': "查找",
     'replace': "替换为",
     'addEdit': "加一条编辑",
+    'addFile': "加一个文件",
+    'filePath': "新文件路径",
+    'fileSource': "内容取自",
+    'codeFiles': "随补丁一起放进去的文件",
+    'codeFilesHint': "这里只写引用。真正的代码放在本插件的 patches/ 目录下，是一个能打开、能 diff、能过 lint 的文件；不是转义过的 JSON 字符串。",
   },
   op: {
     'set': "设置值",
@@ -163,6 +168,11 @@ export const en: typeof zh = {
     'find': 'Find',
     'replace': 'Replace with',
     'addEdit': 'Add an edit',
+    'addFile': 'Add a file',
+    'filePath': 'New file path',
+    'fileSource': 'Content from',
+    'codeFiles': 'Files shipped with the patch',
+    'codeFilesHint': 'A reference only. The code itself lives in a file under this plugin’s patches/ directory — something an editor can open, a diff can show and a linter can read — not as an escaped JSON string.',
   },
   op: {
     'set': 'set a value',

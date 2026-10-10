@@ -65,6 +65,16 @@ for (const path of ['lib/client.js', 'lib/client.js.map']) {
   if (!(packageJson.files ?? []).includes(path)) fail('files must ship ' + path)
 }
 
+// A code patch may add a file whose content ships in this package. If patches/
+// is not published, such a spec loads, reports the file as missing, and has no
+// way to say so — the failure lands on the target plugin instead of here.
+if (!(packageJson.files ?? []).includes('patches')) {
+  fail('files must ship patches/, or a code patch cannot add a file')
+}
+if ((await exists(resolve(root, 'patches'))) === false) {
+  fail('the package promises patches/ but ships no such directory')
+}
+
 for (const path of ['src/reasoning-settings.ts', 'src/index.ts', 'src/spec/schema.ts']) {
   const source = await readFile(resolve(root, path), 'utf8')
   if (source.includes('import { settingsNamespace')) {

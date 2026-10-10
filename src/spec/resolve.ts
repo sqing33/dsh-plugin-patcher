@@ -12,7 +12,7 @@
  */
 
 import { patcherConfigSchema } from './schema.ts'
-import { opPath } from './types.ts'
+import { hasTraversal, opPath } from './types.ts'
 import type { Json, Op, Patch, PatcherConfig, Target, Value } from './types.ts'
 
 /**
@@ -294,14 +294,54 @@ function checkPatch(
         fail('op.config', 'merge-config with an empty config would rewrite the row for nothing')
       }
       break
-    case 'code':
-      if (patch.op.edits.length === 0) {
-        fail('op.edits', 'code with no edits would rewrite the file for nothing')
+    case 'code': {
+      if (!Array.isArray(patch.op.files)) {
+        // Unreachable through the schema, which types the key, and kept
+        // anyway for the same reason as the shape check above: loadSpec owes
+        // its caller diagnostics, never a TypeError from a line that assumed.
+        fail('op.files', 'the files of a code patch must be a list')
+        break
       }
+      const files = patch.op.files
+      if (patch.op.edits.length === 0 && files.length === 0) {
+        // The two lists are alternatives, not halves of one instruction, so
+        // the offending field is the op and not either list.
+        fail('op', 'a code patch must edit or add at least one file')
+        break
+      }
+      // One path twice means the later entry silently overwrites the earlier
+      // one, which turns the order of the array into part of what the patch
+      // means. Every other ambiguity here is refused rather than resolved.
+      const added = new Set<string>()
+      files.forEach((file, j) => {
+        const where = `op.files[${j}]`
+        if (hasTraversal(file.path)) {
+          fail(`${where}.path`, `"${file.path}" climbs out of the package with ".."; a patch may only write inside the package it targets`)
+          return
+        }
+        if (hasTraversal(file.source)) {
+          fail(`${where}.source`, `"${file.source}" climbs out of this package with ".."; added content may only be read from under patches/`)
+          return
+        }
+        if (added.has(file.path)) {
+          fail(`${where}.path`, `"${file.path}" is already added by an earlier files entry; the second one would win, and that makes the order of the list the meaning`)
+          return
+        }
+        added.add(file.path)
+      })
       break
+    }
     case 'set-enabled':
     case 'verify-only':
       break
+  }
+
+  if (patch.target.kind === 'package-file' && hasTraversal(patch.target.path)) {
+    // PACKAGE_PATH_PATTERN rejects an absolute path and a backslash, and says
+    // nothing about "..": saying it needs the segments, not a match over the
+    // whole string. A target that climbs out is a patch aimed at a file in some
+    // other package entirely, which is not what the operator wrote.
+    fail('target.path', `"${patch.target.path}" climbs out of the package with ".."; a patch may only target a file inside the package it names`)
   }
 
   if (patch.target.kind === 'package-file' && !patch.target.version) {

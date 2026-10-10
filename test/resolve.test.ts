@@ -392,3 +392,151 @@ describe('loadSpec: one storage, one writer', () => {
     assert.equal(spec.contestedSlots.size, 0)
   })
 })
+
+describe('loadSpec: a code patch may add files', () => {
+  const EDIT = { find: 'a', replace: 'b', count: 1 }
+  const file = (path: string, source: string): Record<string, unknown> => ({ path, source })
+
+  /**
+   * Refused at either layer, and the point of saying "either": the schema
+   * catches a source that never had the patches/ prefix, while the checks in
+   * resolve.ts catch the ones a pattern cannot see. A test that asserted only
+   * `rejected` would have quietly stopped testing the resolve layer the day
+   * someone tightened a pattern.
+   */
+  function refused(spec: ReturnType<typeof loadSpec>, id: string): boolean {
+    return spec.config === undefined || spec.rejected.has(id)
+  }
+
+  function pathsFor(spec: ReturnType<typeof loadSpec>, patchId: string): string[] {
+    return spec.diagnostics.filter((d) => d.patchId === patchId).map((d) => d.path)
+  }
+
+  it('adds a file without editing anything, and edits a file without adding anything', () => {
+    const added = loadSpec({ patches: [packagePatch('only-files', { op: { kind: 'code', edits: [], files: [file('lib/new.js', 'patches/pkg/new.js')] } })] })
+    assert.equal(added.rejected.size, 0, JSON.stringify(added.diagnostics))
+    assert.equal((added.config?.patches[0]?.op as { files: unknown[] }).files.length, 1)
+
+    const edited = loadSpec({ patches: [packagePatch('only-edits', { op: { kind: 'code', edits: [EDIT] } })] })
+    assert.equal(edited.rejected.size, 0, JSON.stringify(edited.diagnostics))
+    assert.deepEqual((edited.config?.patches[0]?.op as { files: unknown[] }).files, [], 'a spec that never had files: gets an empty list')
+  })
+
+  it('still loads a spec written before files existed', () => {
+    // The regression this whole change has to not cause: every spec already in
+    // a profile says nothing about files, and it must keep working untouched.
+    const spec = loadSpec({ patches: [packagePatch('legacy', { op: { kind: 'code', edits: [EDIT] } })] })
+    assert.ok(spec.config)
+    assert.equal(spec.rejected.size, 0, JSON.stringify(spec.diagnostics))
+    assert.deepEqual(spec.diagnostics, [])
+    assert.deepEqual((spec.config.patches[0]?.op as { edits: unknown[] }).edits, [EDIT])
+  })
+
+  it('refuses a code patch that would do nothing at all', () => {
+    for (const op of [
+      { kind: 'code', edits: [], files: [] },
+      { kind: 'code', edits: [] },
+    ]) {
+      const spec = loadSpec({ patches: [packagePatch('empty', { op })] })
+      assert.ok(spec.rejected.has('empty'), JSON.stringify(op))
+      assert.match(messagesFor(spec, 'empty').join('\n'), /must edit or add at least one file/)
+    }
+  })
+
+  it('refuses a destination that climbs out of the package it targets', () => {
+    for (const path of ['../x', 'a/../b', 'lib/../../etc/passwd', '../patches/x.js']) {
+      const spec = loadSpec({ patches: [packagePatch('escape', { op: { kind: 'code', edits: [], files: [file(path, 'patches/pkg/x.js')] } })] })
+      assert.ok(spec.rejected.has('escape'), path)
+      assert.ok(pathsFor(spec, 'escape').includes('patches[0].op.files[0].path'), path + ' -> ' + JSON.stringify(pathsFor(spec, 'escape')))
+      assert.match(messagesFor(spec, 'escape').join('\n'), /climbs out of the package/)
+    }
+  })
+
+  it('accepts an ordinary destination, dots in names and all', () => {
+    for (const path of ['lib/new.js', 'lib/v1.2/..hidden.js', 'lib/a..b.js']) {
+      const spec = loadSpec({ patches: [packagePatch('fine', { op: { kind: 'code', edits: [], files: [file(path, 'patches/pkg/x.js')] } })] })
+      assert.equal(spec.rejected.size, 0, path + ': ' + JSON.stringify(spec.diagnostics))
+    }
+  })
+
+  it('refuses content that does not live under patches/', () => {
+    const spec = loadSpec({ patches: [packagePatch('outside', { op: { kind: 'code', edits: [], files: [file('lib/new.js', 'src/x.js')] } })] })
+    assert.ok(refused(spec, 'outside'))
+  })
+
+  it('refuses a source path that climbs out, even with the patches/ prefix it needs', () => {
+    for (const source of ['patches/../x', 'patches/pkg/../../x', 'patches/a/../b.js']) {
+      const spec = loadSpec({ patches: [packagePatch('climb', { op: { kind: 'code', edits: [], files: [file('lib/new.js', source)] } })] })
+      assert.ok(spec.rejected.has('climb'), source)
+      assert.ok(pathsFor(spec, 'climb').includes('patches[0].op.files[0].source'), source + ' -> ' + JSON.stringify(pathsFor(spec, 'climb')))
+      assert.match(messagesFor(spec, 'climb').join('\n'), /climbs out of this package/)
+    }
+    for (const source of ['../x', '/etc/passwd', 'patches.js']) {
+      const spec = loadSpec({ patches: [packagePatch('climb', { op: { kind: 'code', edits: [], files: [file('lib/new.js', source)] } })] })
+      assert.ok(refused(spec, 'climb'), source)
+    }
+  })
+
+  it('accepts a source nested under patches/', () => {
+    for (const source of ['patches/pkg/x.js', 'patches/plan-build-switch/lib/new.js', 'patches/.hidden.js']) {
+      const spec = loadSpec({ patches: [packagePatch('nested', { op: { kind: 'code', edits: [], files: [file('lib/new.js', source)] } })] })
+      assert.equal(spec.rejected.size, 0, source + ': ' + JSON.stringify(spec.diagnostics))
+    }
+  })
+
+  it('refuses one destination twice, because the later entry would win', () => {
+    const spec = loadSpec({
+      patches: [packagePatch('twice', { op: { kind: 'code', edits: [], files: [file('lib/new.js', 'patches/pkg/a.js'), file('lib/new.js', 'patches/pkg/b.js')] } })],
+    })
+    assert.ok(spec.rejected.has('twice'))
+    assert.ok(pathsFor(spec, 'twice').includes('patches[0].op.files[1].path'), JSON.stringify(pathsFor(spec, 'twice')))
+    assert.match(messagesFor(spec, 'twice').join('\n'), /already added by an earlier files entry/)
+  })
+
+  it('lets one patch add the same path a different patch also writes, since that is a different patch', () => {
+    // Within one files[] the order would decide. Across two patches the
+    // conflict is a reconcile question, and the checks above are not the place
+    // to answer it.
+    const spec = loadSpec({
+      patches: [
+        packagePatch('one', { op: { kind: 'code', edits: [], files: [file('lib/new.js', 'patches/pkg/a.js')] } }),
+        packagePatch('two', { op: { kind: 'code', edits: [], files: [file('lib/new.js', 'patches/pkg/b.js')] } }),
+      ],
+    })
+    assert.equal(spec.rejected.size, 0, JSON.stringify(spec.diagnostics))
+  })
+
+  it('refuses a target path that climbs out, which the pattern never could', () => {
+    for (const path of ['../x', 'lib/../../etc/passwd']) {
+      const spec = loadSpec({
+        patches: [packagePatch('escape', {
+          target: { kind: 'package-file', pkg: 'p', version: '0.2.2', path },
+          op: { kind: 'code', edits: [EDIT] },
+        })],
+      })
+      assert.ok(spec.rejected.has('escape'), path)
+      assert.ok(pathsFor(spec, 'escape').includes('patches[0].target.path'), path)
+      assert.match(messagesFor(spec, 'escape').join('\n'), /climbs out of the package/)
+    }
+  })
+
+  it('leaves a spec that adds nothing alone', () => {
+    const spec = loadSpec({ patches: [], initialized: true })
+    assert.ok(spec.config)
+    assert.deepEqual(spec.config.patches, [])
+    assert.equal(spec.config.initialized, true)
+    assert.deepEqual(spec.diagnostics, [])
+    assert.equal(spec.rejected.size, 0)
+  })
+
+  it('lets a bad files list fail alone, the way a bad edit list does', () => {
+    const spec = loadSpec({
+      patches: [
+        settingsSet('good'),
+        packagePatch('bad', { op: { kind: 'code', edits: [], files: [file('../x', 'patches/pkg/x.js')] } }),
+      ],
+    })
+    assert.equal(spec.rejected.has('good'), false)
+    assert.ok(spec.rejected.has('bad'))
+  })
+})

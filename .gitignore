@@ -1,5 +1,12 @@
 node_modules
-lib
+
+# The build output at the repository root, and only there. An unanchored `lib`
+# matches any directory of that name at any depth — which is how a module under
+# patches/<pkg>/lib/ silently stopped being committable, and a spec naming a file
+# the published package does not ship fails on the target plugin instead of here.
+/lib
 *.tgz
+
+# Left over from the name this project had before it.
 *.ladder-tmp
-cordis.patch.yml.ladder-backup
+cordis.yml.ladder-backup

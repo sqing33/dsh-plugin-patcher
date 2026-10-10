@@ -223,6 +223,22 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
     readFile(file) {
       return readFileSync(file, 'utf8')
     },
+    readSource(ref) {
+      // A code patch that adds a file gets its content from this package, not
+      // from the spec. The reference is resolved against our own root and the
+      // result is re-checked against it, for the same reason locate re-checks:
+      // the spec chooses the reference, so the spec does not get to choose where
+      // it lands.
+      const root = packageRoot
+      if (root === undefined) {
+        throw new Error('the patcher package root could not be found, so there is nowhere to read "' + ref + '" from')
+      }
+      const file = join(root, ref)
+      if (file !== root && !file.startsWith(root + sep)) {
+        throw new Error('the source reference "' + ref + '" resolves outside the patcher package')
+      }
+      return readFileSync(file, 'utf8')
+    },
   }
 
   function adapters(): EngineAdapters {
