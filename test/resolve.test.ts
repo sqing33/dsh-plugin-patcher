@@ -303,3 +303,92 @@ describe('a field the schema declares must actually be there', () => {
     assert.equal(spec.rejected.size, 0)
   })
 })
+
+describe('loadSpec: one storage, one writer', () => {
+  const NS = 'llm-pi-ai'
+
+  function settings(id: string, path: string[]): Record<string, unknown> {
+    return {
+      id,
+      reason: 'r ' + id,
+      target: { kind: 'settings', namespace: NS },
+      op: { kind: 'set', path, value: 1 },
+    }
+  }
+
+  function merge(id: string, rowId: string): Record<string, unknown> {
+    return {
+      id,
+      reason: 'r ' + id,
+      target: { kind: 'patch-row', rowId },
+      op: { kind: 'merge-config', config: { retries: 2 } },
+    }
+  }
+
+  it('refuses two settings patches on the same path', () => {
+    const spec = loadSpec({ patches: [settings('one', ['providers', 'openai']), settings('two', ['providers', 'openai'])] })
+    assert.equal(spec.contestedSlots.size, 1)
+    for (const id of ['one', 'two']) {
+      const message = spec.diagnostics.find((d) => d.patchId === id)
+      assert.ok(message !== undefined, id + ' must be told why')
+      assert.match(message.message, /overlapping paths/)
+    }
+  })
+
+  it('refuses a path that sits inside another one', () => {
+    const spec = loadSpec({ patches: [settings('one', ['providers']), settings('two', ['providers', 'openai'])] })
+    assert.equal(spec.contestedSlots.size, 1)
+  })
+
+  it('allows two patches on different paths of one namespace', () => {
+    const spec = loadSpec({
+      patches: [settings('one', ['providers']), settings('two', ['limits'])],
+    })
+    assert.equal(spec.contestedSlots.size, 0)
+    assert.equal(spec.diagnostics.length, 0)
+  })
+
+  it('refuses a settings patch and a row merge on the same row', () => {
+    // The whole point: dsh-settings resolves a namespace through the config
+    // editor, so a namespace and a row with that id are one config: key.
+    const spec = loadSpec({ patches: [settings('one', ['providers']), merge('two', NS)] })
+    assert.equal(spec.contestedSlots.size, 1)
+    assert.deepEqual([...spec.contestedSlots].map((s) => s.includes(NS)), [true])
+  })
+
+  it('allows a settings patch and a row merge on different rows', () => {
+    const spec = loadSpec({ patches: [settings('one', ['providers']), merge('two', 'some-other-row')] })
+    assert.equal(spec.contestedSlots.size, 0)
+  })
+
+  it('leaves set-enabled alone: it writes disabled:, not config:', () => {
+    const spec = loadSpec({
+      patches: [
+        settings('one', ['providers']),
+        {
+          id: 'two',
+          reason: 'r two',
+          target: { kind: 'patch-row', rowId: NS },
+          op: { kind: 'set-enabled', enabled: false },
+        },
+      ],
+    })
+    assert.equal(spec.contestedSlots.size, 0)
+    assert.equal(spec.contestedRows.size, 0)
+  })
+
+  it('leaves a verify-only alone, because it writes nothing', () => {
+    const spec = loadSpec({
+      patches: [
+        settings('one', ['providers']),
+        {
+          id: 'two',
+          reason: 'r two',
+          target: { kind: 'settings', namespace: NS },
+          op: { kind: 'verify-only' },
+        },
+      ],
+    })
+    assert.equal(spec.contestedSlots.size, 0)
+  })
+})

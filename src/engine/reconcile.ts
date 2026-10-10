@@ -1,7 +1,7 @@
 import type { ApplyResult, PatcherStatus, PatchState, TargetSnapshot } from '../adapters/types.ts'
 import { fingerprintOf } from './fingerprint.ts'
 import type { JournalEntry, JournalPair } from './journal.ts'
-import { describeTarget, type ResolvedSpec } from '../spec/resolve.ts'
+import { describeTarget, slotOf, type ResolvedSpec } from '../spec/resolve.ts'
 import type { Json, Patch, Target } from '../spec/types.ts'
 
 /**
@@ -122,11 +122,14 @@ async function reconcilePatch(patch: Patch, ctx: PatchContext): Promise<PatcherS
     return done('failed', first ? `${first.path}: ${first.message}` : 'the spec rejected this patch')
   }
 
-  // 2. Two patches wanting the same patch row is a conflict, not a race the
-  //    later patch gets to win: a row is one line of one file.
-  if (patch.target.kind === 'patch-row' && spec.contestedRows.has(patch.target.rowId)) {
-    const claim = spec.diagnostics.find((d) => d.patchId === patch.id && d.path === 'target.rowId')
-    return done('conflict', claim?.message ?? `patch row "${patch.target.rowId}" is claimed by more than one patch`)
+  // 2. Two patches wanting the same storage is a conflict, not a race the
+  //    later patch gets to win: a settings namespace and a patch row are one
+  //    line of one file, and two paths in one namespace overlap only when one
+  //    sits inside the other. The spec worked out which; this asks it.
+  const slot = slotOf(patch)
+  if (slot !== undefined && spec.contestedSlots.has(slot)) {
+    const claim = spec.diagnostics.find((d) => d.patchId === patch.id)
+    return done('conflict', claim?.message ?? `${slot} is written by more than one patch`)
   }
 
   // 3. A build without this adapter must say so rather than report success.

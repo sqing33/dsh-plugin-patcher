@@ -12,6 +12,7 @@
  */
 
 import { patcherConfigSchema } from './schema.ts'
+import { opPath } from './types.ts'
 import type { Json, Op, Patch, PatcherConfig, Target, Value } from './types.ts'
 
 /**
@@ -68,6 +69,8 @@ export interface ResolvedSpec {
    * row is a single shared line in one file.
    */
   contestedRows: ReadonlySet<string>
+  /** Config slots written by more than one patch at overlapping paths. */
+  contestedSlots: ReadonlySet<string>
 }
 
 /**
@@ -187,6 +190,52 @@ function describeTarget(target: Target): string {
  * and an adapters-to-spec import would be a dependency edge the module graph
  * does not otherwise have.
  */
+/**
+ * The one physical slot a patch writes, or undefined when it writes none.
+ *
+ * A settings namespace is not a separate store: dsh-settings resolves it
+ * through the config editor, which lands the value in the `config:` key of the
+ * profile patch row with the same id. So a settings patch on `foo` and a
+ * patch-row patch on row `foo` are two writers for one key, and letting both
+ * through means the second silently undoes the first — which then reports
+ * itself drifted on the next reconcile, forever, with nothing pointing at the
+ * cause.
+ *
+ * `set-enabled` is not in here because it writes the row's `disabled:` key
+ * rather than `config:`, and a verify-only writes nothing at all. Two paths in
+ * one namespace only collide when they overlap, so the slot is the namespace
+ * and the caller compares the paths.
+ */
+export function slotOf(patch: Patch): string | undefined {
+  return configSlot(patch)
+}
+
+function configSlot(patch: Patch): string | undefined {
+  if (patch.op.kind === 'verify-only') return undefined
+  if (patch.target.kind === 'settings') return `the config of patch row "${patch.target.namespace}"`
+  if (patch.target.kind === 'patch-row' && patch.op.kind === 'merge-config') {
+    return `the config of patch row "${patch.target.rowId}"`
+  }
+  return undefined
+}
+
+/**
+ * True when two writers into one slot would fight.
+ *
+ * A path of undefined means the whole slot: a merge writes the entire config
+ * key, so it collides with anything else in that slot, and a path collides with
+ * it too. Two paths collide when one is the other or sits inside it, because
+ * writing a subtree replaces the part of it that was there.
+ */
+function overlaps(one: readonly string[] | undefined, other: readonly string[] | undefined): boolean {
+  if (one === undefined || other === undefined) return true
+  const shared = Math.min(one.length, other.length)
+  for (let index = 0; index < shared; index += 1) {
+    if (one[index] !== other[index]) return false
+  }
+  return true
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -291,12 +340,16 @@ export function loadSpec(raw: unknown, generators: GeneratorRegistry = new Map()
       diagnostics: [{ path, message }],
       rejected: new Set(),
       contestedRows: new Set(),
+      contestedSlots: new Set(),
     }
   }
 
   const rejected = new Set<string>()
   const seen = new Set<string>()
   const rowOwners = new Map<string, string[]>()
+  const slotOwners = new Map<string, Array<{ patchId: string; path: readonly string[] | undefined }>>()
+  const contestedSlots = new Set<string>()
+  const contestedRows = new Set<string>()
 
   parsed.patches.forEach((patch, index) => {
     if (seen.has(patch.id)) {
@@ -314,9 +367,14 @@ export function loadSpec(raw: unknown, generators: GeneratorRegistry = new Map()
       owners.push(patch.id)
       rowOwners.set(patch.target.rowId, owners)
     }
+    const slot = configSlot(patch)
+    if (slot !== undefined) {
+      const owners = slotOwners.get(slot) ?? []
+      owners.push({ patchId: patch.id, path: opPath(patch.op) })
+      slotOwners.set(slot, owners)
+    }
   })
 
-  const contestedRows = new Set<string>()
   for (const [rowId, owners] of rowOwners) {
     if (owners.length < 2) continue
     contestedRows.add(rowId)
@@ -330,13 +388,33 @@ export function loadSpec(raw: unknown, generators: GeneratorRegistry = new Map()
     }
   }
 
+  for (const [slot, owners] of slotOwners) {
+    // Two settings patches in one namespace are fine while their paths are
+    // disjoint: the ladder writes providers, a neighbour writes something else.
+    // Only overlap means the later write makes the earlier one drifted.
+    const fighting = owners.filter((owner) =>
+      owners.some((other) => other !== owner && overlaps(other.path, owner.path)),
+    )
+    if (fighting.length < 2) continue
+    contestedSlots.add(slot)
+    for (const { patchId } of fighting) {
+      diagnostics.push({
+        path: 'target',
+        message: slot + ' is written by ' + String(fighting.length) + ' patches at overlapping paths ('
+          + fighting.map((o) => o.patchId + ' at ' + (o.path === undefined ? 'the whole config' : '[' + o.path.join(', ') + ']')).join('; ') + '); '
+          + 'the last write would leave the others drifted, so none of them is applied',
+        patchId,
+      })
+    }
+  }
+
   for (const id of referencedGenerators(parsed)) {
     if (!generators.has(id)) {
       diagnostics.push({ path: 'op.value', message: `spec references unknown generator "${id}"` })
     }
   }
 
-  return { config: parsed, diagnostics, rejected, contestedRows }
+  return { config: parsed, diagnostics, rejected, contestedRows, contestedSlots }
 }
 
 export { describeTarget }

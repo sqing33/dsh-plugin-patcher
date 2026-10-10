@@ -32,12 +32,17 @@ after(async () => {
 })
 
 /** Raw namespace values, as a settings form would hand them to loadSpec. */
-function settingsSet(id: string, value: Json, extra: Record<string, unknown> = {}): Record<string, unknown> {
+function settingsSet(
+  id: string,
+  value: Json,
+  extra: Record<string, unknown> = {},
+  path: string[] = ['providers', 'openai'],
+): Record<string, unknown> {
   return {
     id,
     reason: 'why ' + id,
     target: { kind: 'settings', namespace: NS },
-    op: { kind: 'set', path: ['providers', 'openai'], value },
+    op: { kind: 'set', path, value },
     ...extra,
   }
 }
@@ -496,7 +501,14 @@ describe('reconcile: the run as a whole', () => {
     const store: FakePort = { value: { providers: { openai: 'gpt-4' } } }
     const fake = fakeAdapter({ log })
     const journal = new Journal(join(dir, 'serial.jsonl'))
-    const spec = loadSpec({ patches: [settingsSet('first', 'gpt-a'), settingsSet('second', 'gpt-b')] })
+    // Disjoint paths on purpose: the point of this test is the order, and two
+    // patches writing the same path are refused by the spec before they get one.
+    const spec = loadSpec({
+      patches: [
+        settingsSet('first', 'gpt-a', {}, ['providers', 'openai']),
+        settingsSet('second', 'gpt-b', {}, ['providers', 'anthropic']),
+      ],
+    })
 
     await reconcileWith(spec, fake, store, loggingJournal(journal, log))
 
@@ -594,7 +606,12 @@ describe('reconcile: the run as a whole', () => {
       readAs: () => ({ state: 'in-sync', value: store.value, detail: 'already matches' }),
     })
     const seen: string[] = []
-    const spec = loadSpec({ patches: [settingsSet('one', 'gpt-a'), settingsSet('two', 'gpt-b')] })
+    const spec = loadSpec({
+      patches: [
+        settingsSet('one', 'gpt-a', {}, ['providers', 'openai']),
+        settingsSet('two', 'gpt-b', {}, ['providers', 'anthropic']),
+      ],
+    })
 
     const statuses = await reconcileWith(spec, fake, store, new Journal(join(dir, 'on-status.jsonl')), {
       onStatus: (status) => {
