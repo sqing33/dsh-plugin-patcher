@@ -21,11 +21,21 @@ import type { Json, Op, Patch, PatcherConfig, Target, Value } from './types.ts'
  * wants to type by hand — a full provider block, a ladder of reasoning levels —
  * without the engine growing any special case for them.
  */
+export interface GeneratorContext {
+  /**
+   * The live value at the path the request is about to write, when the caller
+   * knows it. Generators that compute a value *from* what is already there
+   * (a ladder over the models a provider already declares) need this; a
+   * generator that only needs its own arguments never reads it.
+   */
+  readonly current?: unknown
+}
+
 export interface Generator {
   readonly id: string
   /** One line, shown in the settings page as the generator's own description. */
   readonly description: string
-  generate(args: Record<string, unknown>): Json
+  generate(args: Record<string, unknown>, context?: GeneratorContext): Json
 }
 
 export type GeneratorRegistry = ReadonlyMap<string, Generator>
@@ -99,6 +109,7 @@ export function expandValue(
   value: Value | unknown,
   generators: GeneratorRegistry,
   path = '$',
+  context?: GeneratorContext,
 ): { value?: Json; error?: string } {
   if (isGeneratorRequest(value)) {
     const generator = generators.get(value.$gen)
@@ -107,7 +118,7 @@ export function expandValue(
     }
     let produced: Json
     try {
-      produced = generator.generate(value.args ?? {})
+      produced = generator.generate(value.args ?? {}, context)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return { error: `${path}: generator "${value.$gen}" failed: ${message}` }
@@ -117,7 +128,7 @@ export function expandValue(
   if (Array.isArray(value)) {
     const out: Json[] = []
     for (const [index, item] of value.entries()) {
-      const step = expandValue(item, generators, `${path}[${index}]`)
+      const step = expandValue(item, generators, `${path}[${index}]`, context)
       if (step.error) return { error: step.error }
       out.push(step.value as Json)
     }
@@ -126,7 +137,7 @@ export function expandValue(
   if (isPlainObject(value)) {
     const out: Record<string, Json> = {}
     for (const [key, item] of Object.entries(value)) {
-      const step = expandValue(item, generators, `${path}.${key}`)
+      const step = expandValue(item, generators, `${path}.${key}`, context)
       if (step.error) return { error: step.error }
       out[key] = step.value as Json
     }

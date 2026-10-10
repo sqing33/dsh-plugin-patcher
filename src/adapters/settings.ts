@@ -23,19 +23,26 @@
 
 import type { SettingsDescriptor, SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { fingerprintOf, selectAt } from '../engine/fingerprint.ts'
+import { expandValue, isGeneratorRequest, type GeneratorRegistry } from '../spec/resolve.ts'
 import type { Adapter, ApplyResult, TargetSnapshot } from './types.ts'
 import type { Op, Patch, SettingsTarget, Value } from '../spec/types.ts'
 
 /**
  * The slice of `ctx.settings` this adapter needs.
  *
- * Deliberately structural and two methods wide: the tests drive it with a
- * hand-rolled fake, and the engine hands over `ctx.settings` unchanged because
+ * Deliberately structural and narrow: the tests drive it with a hand-rolled
+ * fake, and the engine hands over `ctx.settings` unchanged because
  * `SettingsForms` already satisfies this shape.
  */
 export interface SettingsPort {
   describe(): SettingsDescriptor[]
   mutate(ns: string, ops: readonly SettingsPathOp[], revision?: number): Promise<void>
+  /**
+   * Generators a `$gen` value may be materialised with. Optional, so a host
+   * that has not wired the patcher in, and the fakes in the tests, both
+   * satisfy the port unchanged.
+   */
+  generators?: GeneratorRegistry
 }
 
 type SettingsPatch = Patch & { target: SettingsTarget }
@@ -55,19 +62,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isWritableOp(op: Op): op is WritableOp {
   return op.kind === 'set' || op.kind === 'unset'
-}
-
-/**
- * The id of an unexpanded generator request, or undefined for a real value.
- *
- * A `Value` is JSON *or* a `{ $gen }` request, and the engine is supposed to
- * materialise the request before handing it to an adapter. If one reaches here
- * anyway, writing it would push a `$gen` literal into somebody else's settings
- * file, so it is surfaced loudly instead.
- */
-function generatorIdOf(value: Value): string | undefined {
-  if (!isRecord(value)) return void 0
-  return typeof value['$gen'] === 'string' ? (value['$gen'] as string) : void 0
 }
 
 /**
@@ -153,6 +147,29 @@ function pathLabel(path: readonly string[]): string {
   return path.length === 0 ? 'the namespace root' : path.join('.')
 }
 
+/**
+ * Materialise a `set` op's value, with the live value at its path in hand.
+ *
+ * Everything else passes through untouched, so the common case costs one
+ * plain-object test. The returned op is a copy: the host keeps the op it is
+ * handed, and the spec's own object must not be reachable from a written op.
+ */
+function resolveOp(
+  op: WritableOp,
+  whole: unknown,
+  port: SettingsPort,
+): { op: WritableOp; error?: string } {
+  if (op.kind !== 'set' || !isGeneratorRequest(op.value)) return { op }
+  const step = expandValue(
+    op.value,
+    port.generators ?? new Map(),
+    'the value for ' + pathLabel(op.path),
+    { current: selectAt(whole, op.path) },
+  )
+  if (step.error !== void 0) return { op, error: step.error }
+  return { op: { kind: 'set', path: [...op.path], value: step.value as Value } }
+}
+
 function rejectedOpKind(kind: string): ApplyResult {
   return {
     state: 'failed',
@@ -208,23 +225,15 @@ function readSettings(port: SettingsPort, patch: SettingsPatch): TargetSnapshot 
     if (!isWritableOp(op)) return { ...rejectedOpKind(op.kind), value }
     const label = pathLabel(op.path)
     if (op.kind === 'set') {
-      const generator = generatorIdOf(op.value)
-      if (generator !== void 0) {
-        return {
-          state: 'failed',
-          value,
-          detail:
-            `the value for ${label} is an unexpanded generator request ($gen "`
-            + `${generator}"); the engine must materialise generators before the adapter runs`,
-        }
-      }
+      const resolved = resolveOp(op, value, port)
+      if (resolved.error !== void 0) return { state: 'failed', value, detail: resolved.error }
       const current = selectAt(value, op.path)
-      return sameValue(current, op.value)
+      return sameValue(current, resolved.op.value)
         ? { state: 'in-sync', value, detail: `${label} in "${namespace}" already matches` }
         : {
           state: 'drifted',
           value,
-          detail: `"${namespace}" holds ${brief(current)} at ${label}, the patch wants ${brief(op.value)}`,
+          detail: `"${namespace}" holds ${brief(current)} at ${label}, the patch wants ${brief(resolved.op.value)}`,
         }
     }
     const current = selectAt(value, op.path)
@@ -257,18 +266,7 @@ async function applySettings(
   const op = patch.op
   if (op.kind === 'verify-only') return { state: 'in-sync', detail: 'verified, nothing written' }
   if (!isWritableOp(op)) return rejectedOpKind(op.kind)
-  if (op.kind === 'set') {
-    const generator = generatorIdOf(op.value)
-    if (generator !== void 0) {
-      return {
-        state: 'failed',
-        detail:
-          `refusing to write the unexpanded generator request ($gen "${generator}") for `
-          + `${pathLabel(op.path)} into "${namespace}"`,
-        before: expected.value,
-      }
-    }
-  }
+
   let descriptor: SettingsDescriptor | undefined
   try {
     descriptor = settingsDescriptorOf(port, namespace)
@@ -283,7 +281,14 @@ async function applySettings(
     }
   }
   try {
-    await port.mutate(namespace, opsFor(op), descriptor.revision)
+    // Resolved again here, against the describe() taken just now, so a
+    // generator reads what is actually stored at write time rather than the
+    // projection read() compared against.
+    const resolved = resolveOp(op, descriptor.value, port)
+    if (resolved.error !== void 0) {
+      return { state: 'failed', detail: `refusing to write: ${resolved.error}`, before: expected.value }
+    }
+    await port.mutate(namespace, opsFor(resolved.op), descriptor.revision)
   } catch (error) {
     return { ...stateOfError(error, namespace), before: expected.value }
   }
