@@ -1,130 +1,80 @@
 # dsh-plugin-patcher
 
-为 DeepSeek Harness 强制写入固定的五档思维强度阶梯。
+把「这个 profile 需要长期维持的改动」写在一处，再用一个页面看它们现在还成不成立。
 
-| 档位 | 值 |
-| --- | --- |
-| 最低 | `off` |
-| 2 | `medium` |
-| 3 | `high` |
-| 4 | `xhigh` |
-| 最高 | `max` |
+要解决的问题很具体。profile 里的第三方插件会漂移 —— harness 改了它调用的 API，或者插件升了版、和 profile 原本假设的形状对不上 —— 通常的修法是直接手改 `node_modules`。但这个改动活不下来：插件管理器每次装卸都实跑 `pnpm add`，没有 manifest 背书的手改会被剪掉。于是同样的修法一遍遍重来，而且没人知道，profile 悄悄变回错的状态。
 
-阶梯会同时写入 `llm-pi-ai` 设置命名空间里声明的每一个模型，**以及** profile 的
-`cordis.patch.yml` 里的模型列表——因为 patch 条目的优先级高于设置层，只改设置是
-不生效的。
+这个插件把修法变成声明式的。你写下「应该是什么样」，宿主每次 reconcile 都去核对，告诉你什么时候不成立了，并把它改回去。
 
-## 为什么单独做一个插件
+## 能绑什么
 
-阶梯本身和阶梯选择器是两件事，但上游把它们打在了同一个包里。这个插件的目的就是：
-改阶梯的时候不用再去 fork 那个画 UI 的插件。
+| 目标 | 改什么 | 谁来写 |
+| --- | --- | --- |
+| `settings` | 另一个插件设置命名空间里的某个路径 | 宿主，走设置服务 |
+| `patch-row` | profile `cordis.patch.yml` 里某行的 `config:` 或 `disabled:` | 宿主，走插件管理器 |
+| `package-file` | 已安装包里的源码 | 独立进程的 CLI，宿主绝不写 |
 
-它和上游之间**没有任何 inter-plugin 耦合**，只依赖两个 DSH 核心标识：设置命名空间
-`llm-pi-ai` 和 patch 条目 id `llm-pi-ai`。
+最后一行是关键，这个限制是刻意的。pnpm 装出来的文件是硬链接进 CAS store 的，原地写会污染同版本的所有副本；而插件管理器自己持锁、自己对「这个树该长什么样」有判断。所以宿主对包文件**只读**：它报漂移、说清看到了什么、并打印出修它的命令。那条命令走 `pnpm patch`，所以产出的补丁有 manifest 背书，下一次装卸也活得下来。
 
-和 `dsh-reasoning-effort` **一起安装**，并把上游插件置为惰性，让两边不会抢同一份数据：
-
-```yaml
-- id: reasoning-effort
-  name: dsh-reasoning-effort
-  config:
-    auto: false
+```bash
+node scripts/apply-code-patch.mjs --patch-id reasoning-ladder --pkg dsh-reasoning-effort
 ```
 
-`auto: false` 且不配 `providers` 时，上游算出的 ops 恒为空数组，一次 `settings.mutate`
-都不会发出去。它继续负责画选择器，值由本插件独家持有。
+## 两半
+
+浏览器那半拥有 spec。它通过本插件自己的设置命名空间写入 —— 和 profile 行 id 是同一个字符串，所以只有一份配置、一个文档、一个宿主要盯的东西。每次编辑都会把 `reconcileNonce` 加一，因为值没变的写入，宿主根本看不见。
+
+宿主那半负责 reconcile。启动时、自己命名空间有任何变化时、以及页面上手动点时，它从零重算整份 spec，把缺的补上。
+
+「全部重算」正是重点所在。一次设置写入可以同时改掉「有哪些补丁」「各自瞄准什么」「各自期望什么」；对「这个 profile 现在该是什么样」没有更便宜的正确算法，而全量重算也让这个循环天然幂等。
+
+## 状态
+
+| 状态 | 含义 |
+| --- | --- |
+| `in-sync` | 目标就是补丁要的样子 |
+| `drifted` | 不是了；重新应用会覆盖现在有的值 |
+| `pending` | 还没核对 |
+| `conflict` | 两条补丁认领同一行、find 命中多处、或别人也在往这儿写 |
+| `unsupported` | 这个宿主做不了：包文件补丁没钉版本，或钉的版本不是已装版本 |
+| `absent` | 目标不在这个部署里 |
+| `failed` | 上一次没做完，细节在 detail 里 |
+
+把补丁关掉会从 journal 回滚，所以「停用一条补丁」同时也是「撤销一条补丁」。journal 里只有半对记录（写 before 之后、写 after 之前崩了）时报冲突并**不**自动回滚 —— 半截记录唯一稳妥的读法是：补丁停了以后，别人又动过这个目标。
+
+## 内置生成器
+
+有一条补丁以生成器而不是固定值的形式提供：思维强度阶梯。该上阶梯的模型清单在写 spec 时是不知道的 —— 它取决于宿主 reconcile 那一刻各家 provider 声明了什么 —— 所以展开发生在看得见活值的地方，也就是设置适配器。
+
+```json
+{ "$gen": "reasoning-ladder", "args": { "config": { "rungs": ["off", "medium", "high", "xhigh", "max"] } } }
+```
 
 ## 安装
 
 ```bash
-dsh plugin add github:sqing33/dsh-plugin-patcher
+pnpm add dsh-plugin-patcher
 ```
 
-## 配置
+bundle 自带 `cordis.patch.yml` 会注册自己的 profile 行，不需要手工添加。
 
-所有键都是可选的，默认配置就是「五档阶梯 + 全局生效」。
+## 几条安全约定
 
-```yaml
-- id: dsh-plugin-patcher
-  name: dsh-plugin-patcher
-  config:
-    # false = 只处理 providers 里显式列出的 provider
-    auto: true
-    # false = 不改 cordis.patch.yml，只写设置
-    force: true
-    defaults:
-      efforts:
-        off: off
-        medium: medium
-        high: high
-        xhigh: xhigh
-        max: max
-    providers:
-      anthropic:
-        disabled: false
-        models:
-          claude-opus-5:
-            disabled: false
-    targets:
-      # true  = 覆盖已经声明过的 reasoningEfforts
-      # false = 原样保留（上游的行为）
-      overwrite: true
-      # true  = 一并处理 modelOverrides 段
-      modelOverrides: true
-```
-
-### `targets.overwrite`
-
-上游只填补**缺失**的声明，这正是「明明配了五档，模型上还挂着 `low`」的来源。
-把它设成 `false` 就退回上游的「只补空缺」语义。
-
-### `targets.modelOverrides`
-
-provider 上可能有一张 `modelOverrides` 表会遮蔽模型列表，默认也会一并写入；
-设成 `false` 可以让它保持原样。
-
-## 安全性
-
-改写 `cordis.patch.yml` 是本插件唯一破坏性的操作，所以做了加固：
-
-- 首次改动前把原文件复制成 `cordis.patch.yml.ladder-backup`，之后不再覆盖；
-- 新内容先写 `cordis.patch.yml.ladder-tmp` 再 `rename` 原子替换，中途崩掉也不会截断
-  profile；
-- 失败会带原因写日志并记进插件状态，不静默吞掉。`llm-pi-ai` 命名空间 40 次重试后
-  仍未出现时，插件会明确报出来，而不是假装成功；
-- 想彻底关掉改写，把 `force` 设成 `false`。
-
-回滚：
-
-```bash
-cp /path/to/profile/cordis.patch.yml.ladder-backup /path/to/profile/cordis.patch.yml
-```
-
-## 与上游的关系
-
-`src/reasoning-settings.ts` 是二开实现的移植，`test/fixtures/expected-ops.json` 由二开
-代码在同一份快照上跑出来：所有共有用例逐字节相同。
-
-三处刻意的差异：
-
-1. **`targets` 两个开关**（`overwrite`、`modelOverrides`）上游表达不了——二开是永远覆盖。
-2. **所有 provider 都会改写，不只第一个。** 二开实现扫到 `llm-pi-ai` 条目里第一个
-   `models:` 块就停，所以一个 patch 条目里声明多个 provider 时，只有第一个拿到阶梯。
-   本插件会走完所有块；阶梯块的缩进也改成从文件推导，不再写死 12 空格。
-3. **patch 改写按上文加固。**
-
-schemastery schema 被拆到 `src/schema.ts`，让阶梯计算保持零依赖纯模块，单测不装任何
-依赖就能跑。
+- **没有 journal 就不写。** journal 写不进去，apply 根本不会执行。
+- **命中次数必须精确。** 代码编辑必须只命中一次；0 次和 2 次都拒绝，绝不靠猜。
+- **spec 是唯一的写通道。** 页面与宿主共用一个字符串，`scripts/verify-package.mjs` 会在两者不再一致时失败。
+- **宿主不跑 pnpm。** 代码补丁由另一个进程落地，命令是看页面的人敲的。
 
 ## 开发
 
 ```bash
-pnpm install
-pnpm test      # 51 个用例，零依赖
-pnpm run build
-pnpm run verify
+pnpm test     # 单测，不需要浏览器
+pnpm build    # 宿主 bundle（esm）和浏览器 bundle（cjs）
+pnpm verify   # manifest、bundle 与文件形态检查
 ```
 
-## 许可证
+`test/client-bundle.test.ts` 会在 VM 里按宿主模块加载器的方式求值构建出来的浏览器 bundle，因为一个加载时就抛异常的 bundle，在终端看来和一个正常的插件毫无区别。
+
+## License
 
 MIT

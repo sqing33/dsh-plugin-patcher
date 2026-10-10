@@ -1,143 +1,79 @@
 # dsh-plugin-patcher
 
-Forces a fixed five-rung reasoning-effort ladder into DeepSeek Harness.
+One place to declare every change this profile needs to keep, and one page to see whether they still hold.
 
-| rung | value |
-| --- | --- |
-| bottom | `off` |
-| 2 | `medium` |
-| 3 | `high` |
-| 4 | `xhigh` |
-| 5 | `max` |
+The problem is specific. A third-party plugin in a DSH profile drifts — the harness changes the API it calls, or the plugin ships a version that no longer matches what the profile assumed — and the usual fix is a hand edit of `node_modules`. That edit does not survive: the plugin manager runs `pnpm add` on every install, and anything without a manifest entry behind it gets pruned. So the fix gets repeated, silently, and the profile quietly goes back to being wrong.
 
-The ladder is applied to every provider model declared in the `llm-pi-ai`
-settings namespace **and** to the model list in the profile's
-`cordis.patch.yml`, because a patch entry outranks the settings layer.
+This plugin makes the fix declarative. You write down what should be true; the host checks it on every reconcile, tells you when it stopped being true, and puts it back.
 
-## Why a separate plugin
+## What it can bind
 
-The effort ladder and the effort *selector* are two different concerns, but
-upstream ships them in one package. This plugin exists so the ladder can be
-changed without forking the plugin that renders the UI. There is no
-inter-plugin coupling: the only two contracts it relies on are the
-`llm-pi-ai` settings namespace and the `llm-pi-ai` patch entry id, both of
-which are stable DSH core identifiers.
+| target | what it changes | who writes it |
+| --- | --- | --- |
+| `settings` | a path inside another plugin's settings namespace | the host, through the settings service |
+| `patch-row` | the `config:` or `disabled:` of a row in the profile's `cordis.patch.yml` | the host, through the plugin manager |
+| `package-file` | source inside an installed package | a separate CLI process, never the host |
 
-Install it **alongside** `dsh-reasoning-effort`, and make the upstream plugin
-inert so the two never fight over the same values:
+That last row is the important one, and the restriction is deliberate. A pnpm-installed file is hard-linked into the content-addressable store, so writing it in place corrupts every other copy of that version, and the plugin manager runs under its own lock with its own idea of what the tree should look like. The host therefore only *reads* package files: it reports drift, says what it found, and prints the command that fixes it. That command goes through `pnpm patch`, so the result is a manifest-backed patch that survives the next install.
 
-```yaml
-- id: reasoning-effort
-  name: dsh-reasoning-effort
-  config:
-    auto: false
+```bash
+node scripts/apply-code-patch.mjs --patch-id reasoning-ladder --pkg dsh-reasoning-effort
 ```
 
-With `auto: false` and no per-provider config, upstream builds an empty op
-list and issues no settings write at all. It keeps rendering the selector;
-this plugin keeps owning the values behind it.
+## The two halves
+
+The browser half owns the spec. It writes it through this plugin's own settings namespace — the same string as the profile row id, so there is one config, one document, and one thing for the host to watch. Every edit bumps a `reconcileNonce`, because a value that does not change is a write the host never sees.
+
+The host half reconciles it. On startup, on any change to its own namespace, and on demand from the page, it recomputes the whole spec from scratch and writes what is missing.
+
+Recomputing everything is the point. One settings write can change which patches exist, what they aim at, and what they expect all at once; there is no cheaper correct answer to "what should this profile look like right now", and a full recomputation also makes the loop idempotent.
+
+## States
+
+| state | meaning |
+| --- | --- |
+| `in-sync` | the target holds what the patch asks for |
+| `drifted` | it does not; re-applying overwrites whatever is there now |
+| `pending` | not checked yet |
+| `conflict` | two patches claim the same row, a find matches more than once, or something else is writing here |
+| `unsupported` | this host cannot do it: a package-file patch with no pinned version, or a version that is not the installed one |
+| `absent` | the target is not in this deployment |
+| `failed` | the last attempt did not finish; the detail says why |
+
+Turning a patch off rolls it back from the journal, so disabling a patch is also how you undo one. A journal holding half a pair — a crash between the before and the after — is reported as a conflict and *not* rolled back, because the safe reading of a half-written record is that somebody else changed the target after the patch stopped.
+
+## The built-in generator
+
+One patch ships as a generator rather than a fixed value: the reasoning-effort ladder. The list of models to put on the ladder is not known when the spec is written — it is whatever the providers happen to declare when the host reconciles — so the expansion happens where the live value is, in the settings adapter.
+
+```json
+{ "$gen": "reasoning-ladder", "args": { "config": { "rungs": ["off", "medium", "high", "xhigh", "max"] } } }
+```
 
 ## Installation
 
 ```bash
-dsh plugin add github:sqing33/dsh-plugin-patcher
+pnpm add dsh-plugin-patcher
 ```
 
-## Configuration
+The bundle registers its own profile row through `cordis.patch.yml`, so there is nothing to add by hand.
 
-Every key is optional. The default configuration is the five-rung ladder
-applied everywhere.
+## Safety notes
 
-```yaml
-- id: dsh-plugin-patcher
-  name: dsh-plugin-patcher
-  config:
-    # false = only touch providers listed under `providers`
-    auto: true
-    # false = skip the cordis.patch.yml rewrite (settings only)
-    force: true
-    defaults:
-      efforts:
-        off: off
-        medium: medium
-        high: high
-        xhigh: xhigh
-        max: max
-    providers:
-      anthropic:
-        disabled: false
-        models:
-          claude-opus-5:
-            disabled: false
-    targets:
-      # true  = overwrite an already-declared reasoningEfforts
-      # false = preserve it (upstream's behaviour)
-      overwrite: true
-      # true  = also cover the modelOverrides section
-      modelOverrides: true
-```
-
-### `targets.overwrite`
-
-Upstream only fills *missing* declarations. That is why an existing model can
-keep a ladder you no longer want — and why `low` tends to survive. Setting
-`overwrite: false` restores upstream's fill-only behaviour if you need it.
-
-### `targets.modelOverrides`
-
-A provider can carry a `modelOverrides` map that shadows the model list. It
-is written too by default; turn it off to leave it alone.
-
-## Safety
-
-The `cordis.patch.yml` rewrite is the only destructive thing this plugin does,
-so it is hardened:
-
-- the untouched original is copied to `cordis.patch.yml.ladder-backup` once,
-  and never overwritten afterwards;
-- the new content is written to `cordis.patch.yml.ladder-tmp` and renamed
-  into place, so an interrupted run can never truncate your profile;
-- a failure is logged with its cause and recorded in the plugin status
-  instead of passing silently. If the `llm-pi-ai` namespace has not appeared
-  after 40 attempts the plugin says so rather than pretending to have
-  succeeded;
-- set `force: false` to disable the patch rewrite entirely.
-
-To restore:
-
-```bash
-cp /path/to/profile/cordis.patch.yml.ladder-backup /path/to/profile/cordis.patch.yml
-```
-
-## Relationship to upstream
-
-The settings transformation in `src/reasoning-settings.ts` is a port of the
-forked implementation, and `test/fixtures/expected-ops.json` was generated by
-running that fork over the same snapshot: all shared cases are byte-identical.
-
-Three deliberate differences:
-
-1. **The `targets` switches** (`overwrite`, `modelOverrides`) have no upstream
-   equivalent — the fork always overwrites.
-2. **Every provider is rewritten, not just the first.** The reference
-   implementation stops after the first `models:` block it finds in the
-   `llm-pi-ai` patch entry, so in a patch declaring several providers only the
-   first one gets the ladder. This plugin walks all of them. The indentation of
-   the rung block is also derived from the file instead of being hardcoded to
-   twelve spaces.
-3. **The patch rewrite is hardened** as described under [Safety](#safety).
-
-The schemastery schema lives in `src/schema.ts` so the ladder arithmetic stays
-a pure module and the unit tests run with nothing installed.
+- **Nothing is written without a journal entry first.** If the journal cannot be written, the apply is not attempted.
+- **Counts are exact.** A code edit must match exactly once; zero matches and two matches are both refused rather than resolved by guessing.
+- **The spec is the only write channel.** Page and host agree on one string, and `scripts/verify-package.mjs` fails if they ever stop agreeing.
+- **The host does not run pnpm.** Applying a code patch is a separate process, started by whoever is reading the page.
 
 ## Development
 
 ```bash
-pnpm install
-pnpm test      # 51 tests, no dependencies required
-pnpm run build
-pnpm run verify
+pnpm test     # unit tests, no browser required
+pnpm build    # host bundle (esm) and browser bundle (cjs)
+pnpm verify   # manifest, bundle and file-shape checks
 ```
+
+`test/client-bundle.test.ts` evaluates the built browser bundle in a VM the way the host's module loader does, because a bundle that throws while loading looks exactly like a working plugin from the terminal.
 
 ## License
 
