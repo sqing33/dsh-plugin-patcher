@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
     devDependencies:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.4
@@ -409,6 +413,11 @@ packages:
     resolution: {integrity: sha512-zj/ob3UsvJGN0whEAKFp53REA5X66hvffVqoCtVQAakJKnKlH+/PcOfMoFwIG/o4rElqLv/ycAFlx8ZlXUorCg==}
     engines: {node: '>=18.12.0'}
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yuku-ast@0.8.7:
     resolution: {integrity: sha512-h6+4bDfyootiMB9vckk5uKo5r5j0GHrkr17FQTDNfEsFT3DWlN9uu1HJwQwc64pgmLCI945fWM3lbTIqxjT3GQ==}
 
@@ -663,6 +672,8 @@ snapshots:
       quansync: 1.0.0
 
   verkit@0.3.2: {}
+
+  yaml@2.9.1: {}
 
   yuku-ast@0.8.7:
     dependencies:

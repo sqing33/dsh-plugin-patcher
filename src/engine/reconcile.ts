@@ -179,11 +179,21 @@ async function reconcilePatch(patch: Patch, ctx: PatchContext): Promise<PatcherS
     // Re-read rather than trusting the adapter's own report: the journal's
     // "after" value is what a future rollback compares against, so it has to be
     // the world as it actually is.
-    let observed = applied.before
+    let observed: unknown
     try {
       observed = binding.adapter.read(binding.port as never, patch).value
-    } catch {
-      // The write already succeeded; keep whatever the adapter reported.
+    } catch (error) {
+      // The write landed and the journal now holds a before with no after.
+      // Writing the adapter's own "before" into the after slot would make the
+      // write-ahead record claim a value the target does not hold, so leave the
+      // pair open instead. A later rollback refuses an open pair, which is the
+      // direction that keeps somebody's edit rather than the one that destroys
+      // it on a guess.
+      return done(
+        'conflict',
+        `the write succeeded but the value it produced could not be read back (${reason(error)}); `
+          + 'the journal pair was left open on purpose, so a later rollback will refuse to run automatically',
+      )
     }
     try {
       await journal.append({
@@ -203,8 +213,19 @@ async function reconcilePatch(patch: Patch, ctx: PatchContext): Promise<PatcherS
   }
 
   // 6. Disabled: this is the rollback path.
-  const pair = await journal.latest(patch.id).catch(() => undefined)
-  if (!pair) {
+  // A journal that cannot be read is a journal this engine knows nothing
+  // about. Reading it as "never wrote" would report a patch clean while
+  // whatever it wrote is still in place, so the read failure is the answer.
+  let pair: JournalPair | undefined
+  try {
+    pair = await journal.latest(patch.id)
+  } catch (error) {
+    return done(
+      'failed',
+      `the journal could not be read (${reason(error)}), so there is no way to tell whether this patch wrote anything`,
+    )
+  }
+  if (pair === void 0) {
     return done('in-sync', 'disabled; this patch never wrote anything, so there is nothing to roll back')
   }
   if (pair.before === undefined || pair.after === undefined) {
