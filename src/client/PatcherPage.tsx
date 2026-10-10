@@ -15,6 +15,7 @@ import {
   writeOps,
   type TargetGroup,
 } from './spec-io.ts'
+import { formatSpecText, parseSpecText } from './spec-text.ts'
 import type { PatcherState } from '../host/state.ts'
 import type { T } from './ns.ts'
 
@@ -81,6 +82,9 @@ export function PatcherPage({ t, form }: PatcherPageProps): React.ReactElement {
   const [editor, setEditor] = useState<EditorState | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [text, setText] = useState('')
+  const [showText, setShowText] = useState(false)
+  const [textError, setTextError] = useState<string | undefined>(undefined)
 
   const patches = useMemo(() => patchesOf(specOf(state)), [state])
   const groups = useMemo(
@@ -139,6 +143,16 @@ export function PatcherPage({ t, form }: PatcherPageProps): React.ReactElement {
           <button type="button" className="pp__btn" disabled={busy} onClick={() => setEditor({ initial: undefined, seed: undefined })}>
             {t('addPatch')}
           </button>
+          <button
+            type="button"
+            className="pp__btn"
+            onClick={() => {
+              setText(formatSpecText(specOf(state)))
+              setShowText(true)
+            }}
+          >
+            {t('action.openText')}
+          </button>
         </div>
       </header>
 
@@ -188,6 +202,53 @@ export function PatcherPage({ t, form }: PatcherPageProps): React.ReactElement {
               void write([...rest, patch])
             }}
           />
+        </section>
+      )}
+
+      {showText && (
+        <section className="pp__group">
+          <h3 className="pp__group-title">{t('textTitle')}</h3>
+          <p className="pp__hint">{t('textNote')}</p>
+          <textarea
+            className="pp__area"
+            data-role="spec-text"
+            rows={14}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+          {textError !== undefined && <p className="pp__error">{textError}</p>}
+          <div className="pp__actions">
+            <button
+              type="button"
+              className="pp__btn"
+              data-variant="primary"
+              disabled={busy || textError !== undefined}
+              onClick={() => {
+                const parsed = parseSpecText(text, state)
+                if (parsed.config === undefined) {
+                  setTextError(parsed.error)
+                  return
+                }
+                setTextError(undefined)
+                void write(patchesOf(parsed.config))
+              }}
+            >
+              {t('action.import')}
+            </button>
+            <button
+              type="button"
+              className="pp__btn"
+              onClick={() => {
+                setText(formatSpecText(specOf(state)))
+                setTextError(undefined)
+              }}
+            >
+              {t('action.export')}
+            </button>
+            <button type="button" className="pp__btn" onClick={() => setShowText(false)}>
+              {t('action.close')}
+            </button>
+          </div>
         </section>
       )}
 
