@@ -3,7 +3,7 @@
     {
       "id": "think-translate-icons-and-seat",
       "enabled": true,
-      "reason": "dsh-think-translate 1.2.5 renders pre-0.1.7 icon exports (IconThinkOutline16 and friends), which resolve to null on 0.1.7, so the settings glyph and the row chevrons silently disappear. It also predates the turn-process seat. This profile carries the fix as a file: vendor with a guard script; declaring it here is what makes the drift visible, and the guard script only checksums. The pin is the version in the vendored package.json — if the profile reports this bundle by its file: specifier instead, match what the page shows.",
+      "reason": "dsh-think-translate 1.2.5 renders pre-0.1.7 icon exports (IconThinkOutline16 and friends), which resolve to null on 0.1.7, so the settings glyph and the row chevrons silently disappear. It also predates the turn-process seat. The profile installs the package as published and takes these edits from here; it used to carry them as a file: vendor behind a checksum guard script, and the vendor plus that script are gone. The pin is the registry version, so an install reporting any other one is not the package this spec was written against.",
       "target": {
         "kind": "package-file",
         "pkg": "dsh-think-translate",

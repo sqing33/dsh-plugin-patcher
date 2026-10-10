@@ -56,13 +56,13 @@ One patch ships as a generator rather than a fixed value: the reasoning-effort l
 
 | file | the hand-edit it declares | state on the profile it came from |
 | --- | --- | --- |
-| `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` calls `commands/execute` with two arguments; the 0.1.7 client contract wants three | `drifted` — this is the one that broke the toggle |
-| `think-translate-icons-and-seat.json` | `dsh-think-translate` looks up pre-0.1.7 icon exports that now resolve to null | `in-sync` — carried as a `file:` vendor plus a checksum guard script |
-| `reasoning-effort-force-effort-tiers.json` | `dsh-reasoning-effort` should be able to force a fixed tier set onto every model, and upstream has no such switch | `drifted` — a fork supplied it, and the fork is the thing this section exists to remove |
+| `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` calls `commands/execute` with two arguments; the 0.1.7 client contract wants three | `in-sync` — this is the one that broke the toggle |
+| `think-translate-icons-and-seat.json` | `dsh-think-translate` looks up pre-0.1.7 icon exports that now resolve to null | `in-sync` — no vendor, no guard script |
+| `reasoning-effort-force-effort-tiers.json` | `dsh-reasoning-effort` should be able to force a fixed tier set onto every model, and upstream has no such switch | `in-sync` — a fork used to supply it, and the fork is the thing this section exists to remove |
 
-Declaring the second one is what replaces the guard script. Its fix was never in the manifest, so nothing was checking it; now the host re-reads the file on every reconcile and says so on the page. The other two are the exception: their fixes have to land once, through the CLI — or through the card's two buttons, which run that same CLI.
+All three land once, through the CLI — or through the card's two buttons, which run that same CLI. What declaring them buys is the other half: the host re-reads the file on every reconcile and says on the page whether the installed copy still matches. That is what replaced the guard script the second one used to need, and it is also what lets a fork be deleted instead of maintained.
 
-Every `find` in all three was checked against the package as published and as installed. The one that is already fixed reads `in-sync`; the two that are not read `drifted` and print the command that lands them.
+Every `find` in all three was checked against the package as published and as installed. On a profile where the CLI has run, all three read `in-sync`; on one where it has not, each reads `drifted` and prints the command that lands it.
 
 An edit that inserts is written as "find this anchor, replace it with the anchor plus the new lines", so after it lands the find is still sitting inside its own replacement. The drift check looks for that containment rather than for the find having vanished, otherwise every inserted block would read as still missing and the CLI would insert it twice.
 

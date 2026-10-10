@@ -56,13 +56,13 @@ node scripts/apply-code-patch.mjs --patch-id reasoning-ladder --pkg dsh-reasonin
 
 | 文件 | 它声明的是哪处手改 | 在原 profile 上的状态 |
 | --- | --- | --- |
-| `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` 调 `commands/execute` 只传两个参数，0.1.7 的客户端契约要三个 | `drifted` —— 就是它把开关弄坏的 |
-| `think-translate-icons-and-seat.json` | `dsh-think-translate` 找的是 0.1.7 之前的图标导出，现在全是 null | `in-sync` —— 靠 `file:` vendor 加一个校验和脚本带着的 |
-| `reasoning-effort-force-effort-tiers.json` | `dsh-reasoning-effort` 应该能把固定的档位集强推到每个模型上，而上游没有这个开关 | `drifted` —— 原来是一个 fork 提供的，而这个 fork 正是下一节要拆掉的东西 |
+| `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` 调 `commands/execute` 只传两个参数，0.1.7 的客户端契约要三个 | `in-sync` —— 就是它把开关弄坏的 |
+| `think-translate-icons-and-seat.json` | `dsh-think-translate` 找的是 0.1.7 之前的图标导出，现在全是 null | `in-sync` —— 没有 vendor，也没有校验脚本 |
+| `reasoning-effort-force-effort-tiers.json` | `dsh-reasoning-effort` 应该能把固定的档位集强推到每个模型上，而上游没有这个开关 | `in-sync` —— 原来是一个 fork 提供的，而这个 fork 正是下一节要拆掉的东西 |
 
-把第二条声明出来，取代的就是那个校验脚本：它的修复从来没进过 manifest，所以没有任何东西在看着它；现在宿主每次 reconcile 都会重读这个文件，并在页面上说出来。头两条是例外，它们的修复得落一次地 —— 走 CLI，或者走卡片上那两个按钮，它们跑的就是同一个 CLI。
+三条都得落一次地 —— 走 CLI，或者走卡片上那两个按钮，它们跑的就是同一个 CLI。声明它们买到的是另一半：宿主每次 reconcile 都会重读这个文件，并在页面上说清装在盘上的那份还配不配。第二条以前需要的那个校验脚本就是被这个替掉的，而它也是让 fork 可以被删掉、而不是被长期养着的东西。
 
-三条里每一个 `find` 都对着「发布时的样子」和「现在装在 node_modules 里的样子」各核了一遍。已经修好的那一条读出来是 `in-sync`，没修的两条读出来是 `drifted`，并打印出能落地的命令。
+三条里每一个 `find` 都对着「发布时的样子」和「现在装在 node_modules 里的样子」各核了一遍。跑过 CLI 的 profile 上三条都读 `in-sync`；没跑过的读 `drifted`，并打印出能落地的命令。
 
 会插入内容的 edit 写成「找到这个锚点，换成锚点加新增的几行」，所以它落完之后，find 还在——就坐在自己那份替换文本里面。漂移检查判的是这个包含关系，而不是 find 有没有消失；否则每一段插入都会被读成「还没改」，CLI 就会再插一遍。
 
