@@ -13,6 +13,7 @@ import {
   assessFile,
   configFrom,
   describeChange,
+  describeCommitFailure,
   forgetPatchState,
   importSmoke,
   newFileHunk,
@@ -1039,6 +1040,45 @@ describe('newFileHunk', () => {
     const hunk = newFileHunk('lib/x.js', '')
     assert.ok(!hunk.includes('@@'), hunk)
     assert.match(hunk, /^new file mode 100644$/m)
+  })
+})
+
+describe('describeCommitFailure', () => {
+  const dir = '/profile/node_modules/.pnpm_patches/pkg@1.0.0'
+
+  it('quotes what pnpm said, on whichever stream it said it', () => {
+    const text = describeCommitFailure({ code: 1, stdout: '', stderr: 'ERR_PNPM_PATCH\n  boom\n', timedOut: false }, dir)
+    assert.match(text, /exited 1 saying/)
+    assert.match(text, /ERR_PNPM_PATCH/)
+    assert.match(text, /Nothing was committed and nothing was installed/)
+    assert.match(text, /state\.json/)
+  })
+
+  it('keeps both streams when pnpm split its complaint across them', () => {
+    const text = describeCommitFailure({ code: 2, stdout: 'head of the diff\n', stderr: 'no index\n' }, dir)
+    assert.match(text, /head of the diff/)
+    assert.match(text, /no index/)
+  })
+
+  it('says pnpm said nothing when it said nothing', () => {
+    // This is the failure that was worth writing a function for: a non-zero
+    // exit with both streams empty reads as a broken tool rather than as a
+    // profile state pnpm did not like.
+    const text = describeCommitFailure({ code: 1, stdout: '', stderr: '' }, dir)
+    assert.match(text, /exited 1 and printed nothing at all/)
+    assert.match(text, /remove that one entry and run this again/i)
+    assert.match(text, new RegExp(dir.replace(/[.\/]/g, '\\$&')))
+  })
+
+  it('treats whitespace-only output as no output', () => {
+    const text = describeCommitFailure({ code: 1, stdout: '\n', stderr: '   \n' }, dir)
+    assert.match(text, /printed nothing at all/)
+  })
+
+  it('names a timeout as a timeout instead of a disagreement', () => {
+    const text = describeCommitFailure({ code: null, stdout: '', stderr: '', timedOut: true }, dir)
+    assert.match(text, /killed after 300s/)
+    assert.match(text, /whether pnpm or the machine is the slow one/)
   })
 })
 

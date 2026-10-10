@@ -461,6 +461,14 @@ function checkSyntaxAt(path) {
 export const SMOKE_TIMEOUT_MS = 15_000
 
 /**
+ * pnpm patch-commit walks the whole extracted package, so it is allowed to
+ * take a while on a large plugin. It is not allowed to take forever: a child
+ * that never exits would leave the profile in a state where the edit
+ * directory exists, the patch was never written, and the button looks broken.
+ */
+const PATCH_COMMIT_TIMEOUT_MS = 300_000
+
+/**
  * Load the patched package and see whether it holds together.
  *
  * node --check only proves the bytes parse. It says nothing about whether the
@@ -475,6 +483,35 @@ export const SMOKE_TIMEOUT_MS = 15_000
  * a failure. We did not time out because the patch is wrong; we stopped
  * watching, and saying otherwise would be inventing a verdict.
  */
+/**
+ * pnpm can fail a patch-commit with nothing on stderr and nothing on stdout,
+ * which turns a recoverable state problem into a mystery. This says what it
+ * did say, says plainly when it said nothing, and says what is safe to do
+ * next — the one thing it never is safe to do is guess at a different
+ * profile state and install over it.
+ */
+export function describeCommitFailure(commit, dir) {
+  const printed = [commit.stdout, commit.stderr]
+    .map((text) => String(text ?? '').trim())
+    .filter((text) => text.length > 0)
+  const parts = [
+    printed.length === 0
+      ? 'pnpm patch-commit exited ' + commit.code + ' and printed nothing at all.'
+      : 'pnpm patch-commit exited ' + commit.code + ' saying:\n' + printed.join('\n'),
+  ]
+  if (commit.timedOut === true) {
+    parts.push('It was killed after ' + PATCH_COMMIT_TIMEOUT_MS / 1000 + 's, so the question is whether pnpm or the machine is the slow one.')
+  }
+  parts.push('Nothing was committed and nothing was installed. The edits are still in ' + dir + '.')
+  parts.push(
+    'If pnpm said nothing, the usual cause is the edit directory it remembers in ' +
+      join(dir, '..', 'state.json') +
+      ' disagreeing with what is on disk. Remove that one entry and run this again: ' +
+      'the profile is untouched until something installs.',
+  )
+  return parts.join('\n\n')
+}
+
 export async function importSmoke(dir, pkg, profileDir) {
   const manifestPath = join(dir, 'package.json')
   if (!existsSync(manifestPath)) return { status: 'skipped', detail: 'the extracted copy has no package.json' }
@@ -773,10 +810,9 @@ export async function main(argv) {
     return 0
   }
 
-  const commit = await run('pnpm', ['patch-commit', dir], profileDir)
+  const commit = await run('pnpm', ['patch-commit', dir], profileDir, PATCH_COMMIT_TIMEOUT_MS)
   if (commit.code !== 0) {
-    process.stderr.write(commit.stderr)
-    die('pnpm patch-commit failed. The edits are in ' + dir + ' and were not committed.')
+    die(describeCommitFailure(commit, dir))
   }
 
   // patch-commit never mentions a file the package did not already have, so
