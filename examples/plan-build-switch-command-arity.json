@@ -1,0 +1,26 @@
+{
+  "patches": [
+    {
+      "id": "plan-build-switch-command-arity",
+      "enabled": true,
+      "reason": "dsh-plan-build-switch 0.2.2 calls commands/execute with two arguments, but the 0.1.7 client contract wants (agentId, line, submittedAttachments). The third argument is the empty list of pasted attachments — a plain mode switch has none. Without it the browser throws \"expected 3 business argument(s) ... got 2\" and the toggle never reaches the server, so the plugin looks alive but does nothing. There is no upstream fix: 0.2.2 is the newest release.",
+      "target": {
+        "kind": "package-file",
+        "pkg": "dsh-plan-build-switch",
+        "version": "0.2.2",
+        "path": "lib/client.js"
+      },
+      "op": {
+        "kind": "code",
+        "edits": [
+          {
+            "find": "\t\t\t\tconst result = await ctx.remote.commands.execute(sessionId, active ? \"/plan\" : \"/plan off\");",
+            "replace": "\t\t\t\tconst result = await ctx.remote.commands.execute(sessionId, active ? \"/plan\" : \"/plan off\", []);",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ],
+  "reconcileNonce": 0
+}

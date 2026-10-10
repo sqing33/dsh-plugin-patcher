@@ -141,26 +141,46 @@ function countOf(text, needle) {
  * Mirrors assessEdits in src/adapters/package-file.ts. See the header for why
  * this duplication exists.
  */
+function spansOf(text, needle) {
+  const spans = []
+  if (needle === '') return spans
+  let at = text.indexOf(needle)
+  while (at >= 0) {
+    spans.push([at, at + needle.length])
+    at = text.indexOf(needle, at + needle.length)
+  }
+  return spans
+}
+
+// See isApplied in src/adapters/package-file.ts: an insertion leaves its own
+// find inside its own replacement, so "the find is gone" is the wrong test.
+// Every occurrence of the find must lie inside an occurrence of the replace.
+function isApplied(text, edit) {
+  if (edit.replace === '') return false
+  const replaces = spansOf(text, edit.replace)
+  if (replaces.length === 0) return false
+  return spansOf(text, edit.find).every(([start, end]) =>
+    replaces.some(([from, to]) => start >= from && end <= to),
+  )
+}
+
 export function assessEdits(text, edits) {
   if (edits.length === 0) return { kind: 'already-applied' }
   let applied = 0
   for (const edit of edits) {
     const found = countOf(text, edit.find)
     if (found === -1) return { kind: 'empty-find', edit }
-    if (found === 0) {
-      if (edit.replace !== '' && countOf(text, edit.replace) > 0) {
-        applied++
-        continue
-      }
-      return { kind: 'no-match', edit }
+    if (isApplied(text, edit)) {
+      applied++
+      continue
     }
+    if (found === 0) return { kind: 'no-match', edit }
     if (found > 1) return { kind: 'many-matches', edit, count: found }
   }
   if (applied === 0) return { kind: 'applicable' }
   if (applied === edits.length) return { kind: 'already-applied' }
   return { kind: 'partial', applied, total: edits.length }
 }
-
 export function firstLine(text) {
   const line = text.split('\n')[0] ?? ''
   return '  ' + (line.length > 70 ? line.slice(0, 67) + '...' : line)

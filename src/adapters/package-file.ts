@@ -72,19 +72,54 @@ export type EditVerdict =
  * `String.replace` with no count argument, which is a bug in whoever wrote
  * the spec and not something to paper over by taking the first.
  */
+/** Ascending [start, end) intervals of every occurrence, or [] for the empty needle. */
+function spansOf(text: string, needle: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  if (needle === '') return spans
+  let at = text.indexOf(needle)
+  while (at >= 0) {
+    spans.push([at, at + needle.length])
+    at = text.indexOf(needle, at + needle.length)
+  }
+  return spans
+}
+
+/**
+ * Whether this edit's work is already in the file.
+ *
+ * A find that is simply missing is the easy case, and the naive test for it
+ * breaks the moment an edit *inserts* instead of replacing: an insertion is
+ * written as "find this anchor, replace it with the anchor plus the new lines",
+ * so after it lands the find is still there, sitting inside its own
+ * replacement. Reporting that as applicable would send the operator back to the
+ * CLI, which would insert the block a second time.
+ *
+ * So the test is containment, not absence: every occurrence of the find has to
+ * lie inside an occurrence of the replace. A find present somewhere else — a
+ * coincidental repeat of a short line — is not covered, and the edit still
+ * counts as work to do, which is the direction that errs towards doing
+ * something the operator asked for rather than towards silently skipping it.
+ */
+function isApplied(text: string, edit: CodeEdit): boolean {
+  if (edit.replace === '') return false
+  const replaces = spansOf(text, edit.replace)
+  if (replaces.length === 0) return false
+  return spansOf(text, edit.find).every(([start, end]) =>
+    replaces.some(([from, to]) => start >= from && end <= to),
+  )
+}
+
 export function assessEdits(text: string, edits: readonly CodeEdit[]): EditVerdict {
   if (edits.length === 0) return { kind: 'already-applied' }
   let applied = 0
   for (const edit of edits) {
     const found = countOf(text, edit.find)
     if (found === -1) return { kind: 'empty-find', edit }
-    if (found === 0) {
-      if (edit.replace !== '' && countOf(text, edit.replace) > 0) {
-        applied++
-        continue
-      }
-      return { kind: 'no-match', edit }
+    if (isApplied(text, edit)) {
+      applied++
+      continue
     }
+    if (found === 0) return { kind: 'no-match', edit }
     if (found > 1) return { kind: 'many-matches', edit, count: found }
   }
   if (applied === 0) return { kind: 'applicable' }

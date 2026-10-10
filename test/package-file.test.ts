@@ -248,3 +248,47 @@ describe('cliCommand', () => {
     assert.equal(cliCommand(patch(), target), 'node scripts/apply-code-patch.mjs --patch-id demo --pkg demo')
   })
 })
+
+describe('assessEdits: edits that insert', () => {
+  // The shape an insertion takes: the anchor is kept and the new lines are put
+  // on top of it. Once it lands, the find is still there — inside its own
+  // replacement — which is the case a "find is gone => applied" test reads as
+  // work still to do, and re-running would insert the block a second time.
+  const ANCHOR = 'function view() {'
+  const INSERT = {
+    find: ANCHOR,
+    replace: 'function helper() {}\n' + ANCHOR,
+    count: 1,
+  }
+  const before = 'x\n' + ANCHOR + '\ny'
+  const after = 'x\nfunction helper() {}\n' + ANCHOR + '\ny'
+
+  it('calls an edit applicable while the inserted lines are absent', () => {
+    assert.equal(assessEdits(before, [INSERT]).kind, 'applicable')
+  })
+
+  it('calls the same edit applied once it has landed', () => {
+    assert.equal(assessEdits(after, [INSERT]).kind, 'already-applied')
+  })
+
+  it('still applies it when only the inserted lines are there twice over', () => {
+    assert.equal(assessEdits(after + '\n' + after, [INSERT]).kind, 'already-applied')
+  })
+
+  it('does not mistake a coincidental repeat for a landed edit', () => {
+    // Same replacement text somewhere else, the real anchor untouched: the find
+    // is not inside the replace, so the edit is still work to do.
+    const decoy = 'function helper() {}\n'
+    assert.equal(assessEdits(before + '\n' + decoy, [INSERT]).kind, 'applicable')
+  })
+
+  it('reports a half-landed insertion instead of finishing it', () => {
+    const other = { find: 'const SIZE = 42;', replace: 'const SIZE = 43;', count: 1 }
+    const half = 'x\nfunction helper() {}\n' + ANCHOR + '\nconst SIZE = 42;\ny'
+    assert.deepEqual(assessEdits(half, [INSERT, other]), {
+      kind: 'partial',
+      applied: 1,
+      total: 2,
+    })
+  })
+})

@@ -188,6 +188,19 @@ describe('the script and the host agree about an edit', () => {
       ],
     ],
     [SOURCE, []],
+    // Insertions, where the find survives inside its own replacement.
+    [
+      'function view() {\n  return 1\n}',
+      [{ find: 'function view() {', replace: 'function helper() {}\nfunction view() {', count: 1 }],
+    ],
+    [
+      'function helper() {}\nfunction view() {\n  return 1\n}',
+      [{ find: 'function view() {', replace: 'function helper() {}\nfunction view() {', count: 1 }],
+    ],
+    [
+      SOURCE + '\nfunction view() {}',
+      [{ find: 'const', replace: 'const helper = 1\nconst', count: 1 }],
+    ],
   ]
 
   for (const [text, edits] of cases) {

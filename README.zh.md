@@ -50,6 +50,22 @@ node scripts/apply-code-patch.mjs --patch-id reasoning-ladder --pkg dsh-reasonin
 { "$gen": "reasoning-ladder", "args": { "config": { "rungs": ["off", "medium", "high", "xhigh", "max"] } } }
 ```
 
+## 三个例子，都来自一个真实的 profile
+
+`examples/` 里躺着三条 spec，是从一个背了三处手改的 profile 上抄下来的。它们就是普通 spec：打开一个、复制文本、粘进页面的导入框。
+
+| 文件 | 它声明的是哪处手改 | 在原 profile 上的状态 |
+| --- | --- | --- |
+| `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` 调 `commands/execute` 只传两个参数，0.1.7 的客户端契约要三个 | `drifted` —— 就是它把开关弄坏的 |
+| `subagent-roles-configforms.json` | `dsh-plugin-subagent-roles` 绑的是 0.1.7 已经删掉的 `ctx.settingsScope` | `in-sync` —— 该 profile 已经带着这个补丁 |
+| `think-translate-icons-and-seat.json` | `dsh-think-translate` 找的是 0.1.7 之前的图标导出，现在全是 null | `in-sync` —— 靠 `file:` vendor 加一个校验和脚本带着的 |
+
+把第二条第三条声明出来，取代的就是那个校验脚本：它们的修复从来没进过 manifest，所以没有任何东西在看着它们；现在宿主每次 reconcile 都会重读这两个文件，并在页面上说出来。第一条是例外，它的修复要通过 CLI 落一次地。
+
+三条里每一个 `find` 都对着「发布时的样子」和「现在装在 node_modules 里的样子」各核了一遍。已经修好的那两条读出来是 `in-sync`，没修的那条读出来是 `drifted`，并打印出能落地的命令。
+
+会插入内容的 edit 写成「找到这个锚点，换成锚点加新增的几行」，所以它落完之后，find 还在——就坐在自己那份替换文本里面。漂移检查判的是这个包含关系，而不是 find 有没有消失；否则每一段插入都会被读成「还没改」，CLI 就会再插一遍。
+
 ## 安装
 
 ```bash

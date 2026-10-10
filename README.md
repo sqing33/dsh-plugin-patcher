@@ -50,6 +50,22 @@ One patch ships as a generator rather than a fixed value: the reasoning-effort l
 { "$gen": "reasoning-ladder", "args": { "config": { "rungs": ["off", "medium", "high", "xhigh", "max"] } } }
 ```
 
+## Three examples, from a real profile
+
+`examples/` holds three specs lifted from a profile that had been carrying three hand-edits. They are ordinary specs: open one, copy the text, paste it into the page's import box.
+
+| file | the hand-edit it declares | state on the profile it came from |
+| --- | --- | --- |
+| `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` calls `commands/execute` with two arguments; the 0.1.7 client contract wants three | `drifted` — this is the one that broke the toggle |
+| `subagent-roles-configforms.json` | `dsh-plugin-subagent-roles` binds `ctx.settingsScope`, which 0.1.7 removed | `in-sync` — the profile already carries the patch |
+| `think-translate-icons-and-seat.json` | `dsh-think-translate` looks up pre-0.1.7 icon exports that now resolve to null | `in-sync` — carried as a `file:` vendor plus a checksum guard script |
+
+Declaring the second and third is what replaces the guard script. Their fixes were never in the manifest, so nothing was checking them; now the host re-reads both files on every reconcile and says so on the page. The first one is the exception: its fix has to land once, through the CLI.
+
+Every `find` in all three was checked against the package as published and as installed. The two that are already fixed read `in-sync`; the one that is not reads `drifted` and prints the command that lands it.
+
+An edit that inserts is written as "find this anchor, replace it with the anchor plus the new lines", so after it lands the find is still sitting inside its own replacement. The drift check looks for that containment rather than for the find having vanished, otherwise every inserted block would read as still missing and the CLI would insert it twice.
+
 ## Installation
 
 ```bash
