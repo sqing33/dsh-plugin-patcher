@@ -50,26 +50,25 @@ node scripts/apply-code-patch.mjs --patch-id reasoning-ladder --pkg dsh-reasonin
 { "$gen": "reasoning-ladder", "args": { "config": { "rungs": ["off", "medium", "high", "xhigh", "max"] } } }
 ```
 
-## 四个例子，都来自一个真实的 profile
+## 三个例子，都来自一个真实的 profile
 
-`examples/` 里躺着四条 spec，是从一个背着若干手改的 profile 上抄下来的。它们就是普通 spec：打开一个、复制文本、粘进页面的导入框。
+`examples/` 里躺着三条 spec，是从一个背着若干手改的 profile 上抄下来的。它们就是普通 spec：打开一个、复制文本、粘进页面的导入框。
 
 | 文件 | 它声明的是哪处手改 | 在原 profile 上的状态 |
 | --- | --- | --- |
 | `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` 调 `commands/execute` 只传两个参数，0.1.7 的客户端契约要三个 | `drifted` —— 就是它把开关弄坏的 |
-| `subagent-roles-configforms.json` | `dsh-plugin-subagent-roles` 绑的是 0.1.7 已经删掉的 `ctx.settingsScope` | `in-sync` —— 该 profile 已经带着这个补丁 |
 | `think-translate-icons-and-seat.json` | `dsh-think-translate` 找的是 0.1.7 之前的图标导出，现在全是 null | `in-sync` —— 靠 `file:` vendor 加一个校验和脚本带着的 |
 | `reasoning-effort-force-effort-tiers.json` | `dsh-reasoning-effort` 应该能把固定的档位集强推到每个模型上，而上游没有这个开关 | `drifted` —— 原来是一个 fork 提供的，而这个 fork 正是下一节要拆掉的东西 |
 
-把第二条第三条声明出来，取代的就是那个校验脚本：它们的修复从来没进过 manifest，所以没有任何东西在看着它们；现在宿主每次 reconcile 都会重读这两个文件，并在页面上说出来。第一条是例外，它的修复得落一次地 —— 走 CLI，或者走卡片上那两个按钮，它们跑的就是同一个 CLI。
+把第二条声明出来，取代的就是那个校验脚本：它的修复从来没进过 manifest，所以没有任何东西在看着它；现在宿主每次 reconcile 都会重读这个文件，并在页面上说出来。头两条是例外，它们的修复得落一次地 —— 走 CLI，或者走卡片上那两个按钮，它们跑的就是同一个 CLI。
 
-四条里每一个 `find` 都对着「发布时的样子」和「现在装在 node_modules 里的样子」各核了一遍。已经修好的那两条读出来是 `in-sync`，没修的两条读出来是 `drifted`，并打印出能落地的命令。
+三条里每一个 `find` 都对着「发布时的样子」和「现在装在 node_modules 里的样子」各核了一遍。已经修好的那一条读出来是 `in-sync`，没修的两条读出来是 `drifted`，并打印出能落地的命令。
 
 会插入内容的 edit 写成「找到这个锚点，换成锚点加新增的几行」，所以它落完之后，find 还在——就坐在自己那份替换文本里面。漂移检查判的是这个包含关系，而不是 find 有没有消失；否则每一段插入都会被读成「还没改」，CLI 就会再插一遍。
 
 ## 改功能：加一个文件，而不只是改一行
 
-前面三个例子都只是**修**东西。第四个是这插件另一半的用途：不 fork，改掉一个插件的行为。
+前面两个例子都只是**修**东西。第三个是这插件另一半的用途：不 fork，改掉一个插件的行为。
 
 光靠 edit 做不到。给一个已经发布的 bundle 加一个开关，等于往它里面塞三行、再加一个一百五十行的新模块 —— 而这一百五十行才是要紧的那部分。spec 是设置文本框里的 JSON，写在那儿的模块就是一串 `\n` 转义文本：编辑器打不开、diff 看不出、linter 读不了。而且它偏偏是最容易写错的部分 —— 注入的代码去调上游已经改了名的符号，语法检查照样全过，然后整个 web boot 跟着它一起塌。
 
@@ -88,7 +87,7 @@ node scripts/apply-code-patch.mjs --patch-id reasoning-ladder --pkg dsh-reasonin
 
 宿主依然不写盘。它把每个声明的文件跟装在盘上的比，只有「edit 落到位了**且**每个文件都对得上」才报 `in-sync`。缺文件或内容不同都算漂移，detail 里带上两边的字节数 —— 内容不同是这个补丁自己的地，「改源码再跑一遍」是正常迭代，把它报成 conflict 反而会在每一轮都宣称有人手改过。
 
-## 装上就有的四条
+## 装上就有的三条
 
 空 spec 等于什么都不看，所以第一次启动时宿主会把 `examples/` 里的几条写进本插件自己的命名空间，写完当轮就 reconcile。
 

@@ -422,9 +422,15 @@ export const packageFileAdapter: Adapter<PackageFilePort, PackageFileTarget> = {
   kind: 'package-file',
   read: readPackageFile,
 
+  // Reached only when read said drifted, so the target genuinely does not
+  // carry the change yet. Saying unsupported here would be a category
+  // error: the target is readable and the spec matches it, the host just
+  // declines to be the thing that writes — and the state a person acts on is
+  // the one the file is in. The command is still in the detail, because the
+  // way out of drifted is the one line that leaves this process.
   async apply(_port, patch): Promise<ApplyResult> {
     return {
-      state: 'unsupported',
+      state: 'drifted',
       detail:
         'the host neither rewrites nor adds files inside an installed package; run ' +
         cliCommand(patch, targetOf(patch)) +
@@ -433,6 +439,10 @@ export const packageFileAdapter: Adapter<PackageFilePort, PackageFileTarget> = {
     }
   },
 
+  // A file patch never writes a journal, so this is unreachable in practice —
+  // the engine has nothing to roll back to. It stays a refusal rather than a
+  // pretend: un-writing an installed package is exactly the thing the host
+  // does not do.
   async rollback(_port, patch): Promise<ApplyResult> {
     return {
       state: 'unsupported',

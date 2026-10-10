@@ -286,10 +286,15 @@ describe('read', () => {
 })
 
 describe('apply and rollback', () => {
-  it('never writes, and says which command does', async () => {
+  it('never writes, still says drifted, and names the command that does', async () => {
+    // The engine only calls apply once read has said drifted, so the file
+    // really does not carry the change. Answering unsupported would report a
+    // category that is not true — the target is readable and the spec matches
+    // it — and would leave the page unable to offer the one line that fixes it.
     const result = await packageFileAdapter.apply(port(), patch())
-    assert.equal(result.state, 'unsupported')
+    assert.equal(result.state, 'drifted')
     assert.match(String(result.detail), /--patch-id demo --pkg demo/)
+    assert.equal(result.before, undefined)
   })
 
   it('rolls back the same way', async () => {

@@ -1,6 +1,6 @@
 /** The settings page: what is bound, what is wrong, and what can still be bound. */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Patch, Target } from '../spec/types.ts'
 import { refreshPatcherState, usePatcherState, type SpecForm } from './usePatcherState.ts'
 import { PatchEditor } from './PatchEditor.tsx'
@@ -113,6 +113,36 @@ export function PatcherPage({ t, form }: PatcherPageProps): React.ReactElement {
     },
     [form, state, t],
   )
+
+  // The one write this page makes without being asked.
+  //
+  // A plugin cannot write settings while it is still being loaded: every write
+  // goes through the profile reconcile, and that one refuses to nest inside
+  // the load transaction the fiber is part of. So the host's own first attempt
+  // is always turned down, and a timer made during the load inherits the same
+  // context, so waiting does not help either. This page is not inside that
+  // transaction, and writing the spec is the control channel anyway.
+  //
+  // Guarded to the untouched case only: the namespace has to still be
+  // uninitialised, writable, and carrying none of the defaults. An operator
+  // who emptied the list on purpose has made a decision, and the flag is how
+  // that decision is recorded.
+  const seeded = useRef(false)
+  useEffect(() => {
+    if (seeded.current || !ready || state === undefined) return
+    if (!state.writable || state.spec?.initialized === true) return
+    if (patches.length > 0 || state.defaults.length === 0) return
+    seeded.current = true
+    void form.mutate(writeOps({ ...specOf(state), patches: state.defaults, reconcileNonce: bumpedNonce(specOf(state)) }))
+      .then(() => {
+        setNotice(t('saved'))
+        setTimeout(refreshPatcherState, 200)
+      })
+      .catch(() => {
+        // A refused write is not a failure worth a modal: the card below still
+        // offers the same four patches behind a button.
+      })
+  }, [form, patches.length, ready, state, t])
 
   if (!ready || state === undefined) {
     return (

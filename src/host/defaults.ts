@@ -35,7 +35,6 @@ import type { Patch, PatcherConfig } from '../spec/types.ts'
  */
 export const DEFAULT_EXAMPLE_FILES: readonly string[] = [
   'plan-build-switch-command-arity.json',
-  'subagent-roles-configforms.json',
   'think-translate-icons-and-seat.json',
   'reasoning-effort-force-effort-tiers.json',
 ]

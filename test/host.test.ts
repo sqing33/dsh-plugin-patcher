@@ -425,12 +425,11 @@ describe('seeding the built-in defaults', () => {
     apply(host.ctx)
     const state = await settled(host)
     assert.equal(state.spec?.initialized, true)
-    assert.equal(state.spec?.patches.length, 4)
+    assert.equal(state.spec?.patches.length, 3)
     // The hand-edits this profile actually carries, so the page is not
     // empty on a fresh install and the operator can see what the plugin is for.
     assert.deepEqual(state.spec?.patches.map((patch) => patch.id), [
       'plan-build-switch-command-arity',
-      'subagent-roles-configforms',
       'think-translate-icons-and-seat',
       'reasoning-effort-force-effort-tiers',
     ])
@@ -453,7 +452,7 @@ describe('seeding the built-in defaults', () => {
     const state = await settled(host)
     // The seeded patches name real packages; this profile has one, so every one
     // of them lands on a state the operator can act on rather than on nothing.
-    assert.equal(state.statuses.length, 4)
+    assert.equal(state.statuses.length, 3)
     for (const status of state.statuses) assert.notEqual(status.state, 'pending')
   })
 
@@ -469,44 +468,38 @@ describe('seeding the built-in defaults', () => {
     assert.equal(host.settings.writes.length, first)
   })
 
-  it('asks again when the first write was refused, instead of calling the profile unwritable', async () => {
+  it('names the load-time refusal for what it is, and leaves the write to a later pass', async () => {
     const host = await fakeHost(unseeded())
-    // What a cold install actually does. The seed writes through the settings
-    // layer, which writes through the profile reconcile, and that one refuses
-    // to run inside another -- so the first attempt lands inside the mount
-    // transaction this very fiber is part of, and is turned down. The refusal
-    // says nothing about whether the profile can store settings, and reporting
-    // it as the answer leaves a fresh install with no defaults and no way to
-    // tell that anything went wrong.
-    let refusals = 2
+    // What a cold install actually does. Every settings write goes through the
+    // profile reconcile, and that one refuses to run inside another transaction
+    // -- so a fiber that tries to write settings while it is still being loaded
+    // is turned down, and the refusal says nothing about whether the profile
+    // can store settings.
     const real = host.settings.mutate.bind(host.settings)
     host.settings.mutate = async (ns, ops, revision) => {
-      if (refusals > 0) {
-        refusals -= 1
-        throw new Error('HMR transactions cannot be nested')
-      }
-      return real(ns, ops, revision)
+      throw new Error('HMR transactions cannot be nested. Nothing was changed.')
     }
     apply(host.ctx)
-    // Not settled(): that returns on the first pass, which here is the pass
-    // that got refused. The state being asked for is the one after a retry.
-    let state: (PatcherState & { ok: boolean }) | undefined
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 25))
-      const reply = await host.fetch(STATE_PATH)
-      const seen = JSON.parse(reply.body) as PatcherState & { ok: boolean }
-      if (seen.spec?.initialized === true) {
-        state = seen
-        break
-      }
-    }
-    assert.ok(state, 'the seed never landed')
-    assert.equal(refusals, 0)
-    assert.equal(state.spec?.initialized, true)
-    assert.equal(state.spec?.patches.length, 4)
-    // And the transient refusal is not left sitting in the error slot, where
-    // it would read as the standing state of the namespace.
-    assert.equal(state.error, undefined)
+    const refused = await settled(host)
+    assert.notEqual(refused.spec?.initialized, true, 'the defaults did not land')
+    // The message has to name the cause. A raw HMR error on the page reads as
+    // a broken host; what actually happened is that the write was too early,
+    // and the way out is the one path that is not this fiber.
+    assert.match(String(refused.error), /still being loaded/)
+    assert.match(String(refused.error), /Open this page once/)
+    assert.doesNotMatch(String(refused.error), /HMR transactions cannot be nested/)
+    assert.equal(host.settings.writes.length, 0, 'nothing was written, and nothing should be claimed')
+
+    // The next pass is not inside the load any more. Nothing re-arms a timer:
+    // an earlier version retried on a schedule, and every one of those attempts
+    // inherited the same async context and was refused identically. What makes
+    // the second pass possible is that something outside started it.
+    host.settings.mutate = real
+    host.emit('settings/document-updated', 'dsh-plugin-patcher', 1)
+    const later = await settled(host, refused.reconciledAt)
+    assert.equal(later.spec?.initialized, true)
+    assert.equal(later.spec?.patches.length, 3)
+    assert.equal(later.error, undefined)
   })
 
   it('leaves an emptied spec empty, which is the whole point of the flag', async () => {
@@ -565,7 +558,7 @@ describe('seeding the built-in defaults', () => {
     const state = await settled(host)
     // Seeded or not, the page can always show what would be there, so an
     // operator who cleared the list can get it back without a reinstall.
-    assert.equal(state.defaults.length, 4)
+    assert.equal(state.defaults.length, 3)
     assert.deepEqual(state.defaultProblems, [])
   })
 })

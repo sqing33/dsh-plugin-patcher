@@ -271,11 +271,17 @@ export function bumpedNonce(config: PatcherConfig): PatcherConfig {
  * the host folding a partial object into a spec it is reconciling at the same
  * time. The nonce comes second and always, because the host only re-applies
  * when the value it watches changes.
+ *
+ * The flag is set here, and always to true, because reaching this function at
+ * all is the decision: something on the page wrote the spec on purpose. Left
+ * out, the host would keep reading an uninitialised namespace and seed its
+ * four defaults into a list the operator had just emptied.
  */
 export function writeOps(next: PatcherConfig): Array<{ op: 'set'; path: string[]; value: unknown }> {
   return [
     { op: 'set', path: ['patches'], value: patchesOf(next) },
     { op: 'set', path: ['reconcileNonce'], value: next.reconcileNonce },
+    { op: 'set', path: ['initialized'], value: true },
   ]
 }
 

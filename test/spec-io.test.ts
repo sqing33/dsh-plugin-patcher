@@ -443,11 +443,15 @@ describe('bumpedNonce', () => {
 describe('writeOps', () => {
   const config = configOf([settingsPatch('a'), rowPatch('b')], 5)
 
-  it('writes exactly two ops, the whole array first', () => {
+  it('writes the array, the nonce, and the fact that a decision was made', () => {
     const ops = writeOps(config)
-    assert.equal(ops.length, 2)
-    assert.deepEqual(ops.map((op) => op.path), [['patches'], ['reconcileNonce']])
+    assert.equal(ops.length, 3)
+    assert.deepEqual(ops.map((op) => op.path), [['patches'], ['reconcileNonce'], ['initialized']])
     assert.ok(ops.every((op) => op.op === 'set'))
+    // Always true, never passed through: the host reads this flag to decide
+    // whether it still owes the operator the built-in defaults, and a page
+    // that writes the spec has already answered that question.
+    assert.equal(ops[2]?.value, true)
   })
 
   it('carries the array itself, not a diff of it', () => {

@@ -31,7 +31,6 @@ describe('the shipped examples', () => {
       [
         'plan-build-switch-command-arity.json',
         'reasoning-effort-force-effort-tiers.json',
-        'subagent-roles-configforms.json',
         'think-translate-icons-and-seat.json',
       ],
     )

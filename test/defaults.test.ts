@@ -94,7 +94,6 @@ test('loadDefaultPatches', async (t) => {
     assert.deepEqual(problems, [])
     assert.deepEqual(patches.map((patch) => patch.id), [
       'plan-build-switch-command-arity',
-      'subagent-roles-configforms',
       'think-translate-icons-and-seat',
       'reasoning-effort-force-effort-tiers',
     ])
@@ -111,23 +110,23 @@ test('loadDefaultPatches', async (t) => {
     const { patches, problems } = loadDefaultPatches((name) =>
       name === 'think-translate-icons-and-seat.json' ? undefined : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 3)
+    assert.equal(patches.length, 2)
     assert.match(problems[0] ?? '', /think-translate-icons-and-seat\.json is missing/)
   })
 
   await t.test('drops an example the schema rejects, and says why', () => {
     const { patches, problems } = loadDefaultPatches((name) =>
-      name === 'subagent-roles-configforms.json' ? spec({ id: 'no-reason' }) : spec(codePatch(patchIdFor(name))),
+      name === 'reasoning-effort-force-effort-tiers.json' ? spec({ id: 'no-reason' }) : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 3)
-    assert.match(problems[0] ?? '', /subagent-roles-configforms\.json did not load/)
+    assert.equal(patches.length, 2)
+    assert.match(problems[0] ?? '', /reasoning-effort-force-effort-tiers\.json did not load/)
   })
 
   await t.test('drops an example that is not JSON, and quotes the parser', () => {
     const { patches, problems } = loadDefaultPatches((name) =>
       name === 'plan-build-switch-command-arity.json' ? '{oops' : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 3)
+    assert.equal(patches.length, 2)
     assert.match(problems[0] ?? '', /is not valid JSON/)
   })
 
@@ -144,11 +143,11 @@ test('loadDefaultPatches', async (t) => {
 
   await t.test('takes every patch an example carries, not just the first', () => {
     const { patches } = loadDefaultPatches((name) =>
-      name === 'subagent-roles-configforms.json'
+      name === 'think-translate-icons-and-seat.json'
         ? spec(codePatch('one'), codePatch('two'))
         : spec(codePatch(patchIdFor(name))),
     )
-    assert.equal(patches.length, 5)
+    assert.equal(patches.length, 4)
   })
 
   await t.test('reads a real examples directory off disk', () => {

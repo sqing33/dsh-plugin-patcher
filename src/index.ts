@@ -76,22 +76,6 @@ export const inject = ['settings']
  */
 const DEBOUNCE_MS = 50
 
-/**
- * How long to wait before trying the built-in seed again, and how many times.
- *
- * The seed writes through the settings layer, which writes through the
- * profile's own reconcile, and that one refuses to run inside another. On a
- * cold install the very first attempt lands inside the mount transaction this
- * fiber is part of, so it is refused every time — and refused for a reason
- * that has nothing to do with whether the profile can store settings at all.
- *
- * So the first failure is treated as a question rather than an answer, and
- * asked again. The bound is not there to be tight; it is there so that a real
- * refusal — a read-only profile, a namespace that will not validate — ends up
- * on the page instead of looping until someone restarts DSH.
- */
-const SEED_RETRY_MS = 400
-const SEED_ATTEMPTS = 30
 
 /**
  * Fibers that already own a reconcile loop.
@@ -157,8 +141,6 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
   let timer: ReturnType<typeof setTimeout> | undefined
   let busy = false
   let again = false
-  /** How many times the seed has been re-attempted since the last good one. */
-  let seedAttempts = 0
 
   const settingsPort: SettingsPort = {
     describe: () => ctx.settings.describe(),
@@ -190,10 +172,24 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
     try {
       await ctx.settings.mutate(namespace, seedOps(patches))
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       seedFailure =
-        'the built-in defaults could not be written: ' +
-        (error instanceof Error ? error.message : String(error)) +
-        '. Nothing was changed.'
+        message.includes('HMR transactions cannot be nested')
+          ?
+          // Worth naming rather than passing through. Every settings write goes
+          // through the profile reconcile, and that one refuses to run inside
+          // another transaction — so a fiber cannot write settings while it is
+          // still being loaded, no matter how long it waits. A timer made during
+          // the load inherits the same context, so waiting inside this fiber
+          // cannot help either. Any later pass that runs from outside one — the
+          // page writing the spec, which is the control channel anyway — lands
+          // the defaults on its own.
+          'the built-in defaults could not be written yet: this plugin is still being loaded, ' +
+          'and a plugin cannot write settings from inside its own load. Open this page once ' +
+          'and the defaults are written through the same path the rest of the spec uses. ' +
+          'Nothing was changed.'
+          :
+          'the built-in defaults could not be written: ' + message + '. Nothing was changed.'
       return
     }
     // `mutate` resolves void, and a write that was dropped resolves the same
@@ -291,21 +287,11 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
         if (defaults.patches.length > 0) {
           await seed(defaults.patches)
           if (seedFailure === undefined) {
-            seedAttempts = 0
             // The write lands in cordis.patch.yml, and so does everything else
             // the settings namespace holds, which is where the apply command
             // reads the spec from. Carry the result forward so this pass already
             // reconciles it instead of waiting for the event to come back.
             spec = loadSpec(ctx.settings.describe().find((d) => d.ns === namespace)?.value, generators)
-          } else if (seedAttempts < SEED_ATTEMPTS) {
-            // The write goes through the profile's own reconcile, and that one
-            // refuses to nest. So the first attempt after a cold install races
-            // the mount transaction this very fiber is part of, and loses. The
-            // transaction ends on its own schedule, which is not ours to guess,
-            // so this waits and tries again rather than declaring the defaults
-            // unwritable. Bounded, because a real refusal has to surface.
-            seedAttempts += 1
-            schedule(SEED_RETRY_MS)
           }
         } else {
           seedFailure =
