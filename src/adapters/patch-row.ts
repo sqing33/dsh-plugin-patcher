@@ -104,25 +104,44 @@ interface RowSpan {
  * match would make the patcher report drift against a row that is not in effect.
  */
 function findRow(lines: string[], rowId: string): RowSpan | undefined {
+  return rowSpans(lines).get(rowId)
+}
+
+/**
+ * Every top-level row in the file, keyed by id, later declarations winning.
+ *
+ * One scanner for both findRow and listPatchRows on purpose: a page that
+ * offers a row the adapter then cannot find is a lie the operator pays for.
+ */
+function rowSpans(lines: string[]): Map<string, RowSpan> {
+  const found = new Map<string, RowSpan>()
   const first = lines.find((line) => /^[ \t]*- /.test(line))
-  if (first === undefined) return void 0
+  if (first === undefined) return found
   const topIndent = indentOf(first)
 
   let start = -1
+  let rowId = ''
+  const remember = (): void => {
+    if (start >= 0) found.set(rowId, spanOf(lines, start, topIndent))
+  }
   for (let i = 0; i < lines.length; i++) {
     const match = /^([ \t]*)- id:[ \t]*(.*)$/.exec(lines[i]!)
     if (match === null || match[1]!.length !== topIndent) continue
-    if (unquote(match[2]!.trim()) !== rowId) continue
+    remember()
     start = i
+    rowId = unquote(match[2]!.trim())
   }
-  if (start < 0) return void 0
+  remember()
+  return found
+}
+
+function spanOf(lines: string[], start: number, dashIndent: number): RowSpan {
 
   // Two passes, and the order matters. Finding the row's end is a scan that
   // runs to the next top-level row; finding its key indent is a question about
   // the first key inside that range. Doing both in one loop meant the first key
   // line ended the scan, the row ran to the end of the file, and a `disabled:`
   // key from a later row answered for this one.
-  const dashIndent = topIndent
   let end = lines.length
   for (let i = start + 1; i < lines.length; i++) {
     if (isSkippable(lines[i]!)) continue
@@ -360,6 +379,32 @@ function readRow(port: PatchRowPort, patch: Patch): TargetSnapshot {
       ? 'the patcher has not written this row yet'
       : inSync ? 'the managed block matches the spec' : 'the managed block differs from the spec',
   }
+}
+
+/** One addressable row, as the page sees it. */
+export interface PatchRowSummary {
+  rowId: string
+  /** The npm package a bundle declared, when the row names one. */
+  name: string | undefined
+  enabled: boolean
+}
+
+/**
+ * Every row this adapter could drive, for the page to offer as a target.
+ *
+ * Malformed text yields fewer rows, never an exception: a page that is the only
+ * way to fix a broken patch file must still open when the patch file is broken.
+ */
+export function listPatchRows(text: string): PatchRowSummary[] {
+  const lines = text.split('\n')
+  const spans = rowSpans(lines)
+  return [...spans.entries()].map(([rowId, span]) => {
+    try {
+      return { rowId, name: scalarAt(lines, span, 'name'), enabled: rowEnabled(lines, span) }
+    } catch {
+      return { rowId, name: undefined, enabled: true }
+    }
+  })
 }
 
 export const patchRowAdapter: Adapter<PatchRowPort, PatchRowTarget> = {

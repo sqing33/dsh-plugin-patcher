@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { packageFileAdapter, type PackageFilePort } from './adapters/package-file.ts'
-import { patchRowAdapter, patchRowFilePort } from './adapters/patch-row.ts'
+import { listPatchRows, patchRowAdapter, patchRowFilePort, type PatchRowSummary } from './adapters/patch-row.ts'
 import { settingsAdapter, type SettingsPort } from './adapters/settings.ts'
 import type { Adapter, PatcherStatus } from './adapters/types.ts'
 import { Journal } from './engine/journal.ts'
@@ -116,6 +116,8 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
   let reconciledAt: string | undefined
   let failure: string | undefined
   let versions: Map<string, string> | undefined
+  let bundles: Array<{ pkg: string; version: string | undefined }> = []
+  let inventoryRows: PatchRowSummary[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   let busy = false
   let again = false
@@ -132,6 +134,15 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
 
   const patchPath = configEditor?.documentPath ?? patchPathOf(profileDir)
   const rowPort = patchPath === undefined ? undefined : patchRowFilePort(patchPath, setRowEnabled)
+  /** A missing or unreadable patch file is an empty inventory, not a failed reconcile. */
+  const readRows = (): string => {
+    if (patchPath === undefined) return ''
+    try {
+      return readFileSync(patchPath, 'utf8')
+    } catch {
+      return ''
+    }
+  }
 
   /**
    * Read a file inside an installed package.
@@ -170,8 +181,11 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
   async function once(): Promise<void> {
     try {
       if (manager !== undefined) {
-        const bundles = await manager.listBundles()
-        versions = new Map(bundles.map((bundle) => [bundle.name, bundle.version ?? '']))
+        const listed = await manager.listBundles()
+        bundles = listed
+          .map((bundle) => ({ pkg: bundle.name, version: bundle.version }))
+          .sort((a, b) => (a.pkg < b.pkg ? -1 : 1))
+        versions = new Map(listed.map((bundle) => [bundle.name, bundle.version ?? '']))
       } else {
         versions = undefined
       }
@@ -187,6 +201,7 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
         },
       })
       statuses.replace(done)
+      inventoryRows = rowPort === undefined ? [] : listPatchRows(readRows())
       reconciledAt = new Date().toISOString()
       failure = undefined
     } catch (error) {
@@ -232,6 +247,11 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
       rejected: [...spec.rejected],
       contestedRows: [...spec.contestedRows],
       generators: generatorCatalog(generators),
+      inventory: {
+        settings: ctx.settings.describe().map((descriptor) => descriptor.ns).sort(),
+        rows: inventoryRows,
+        bundles,
+      },
       statuses: [...statuses.list()],
       tally: statuses.tally(),
       reconciledAt,

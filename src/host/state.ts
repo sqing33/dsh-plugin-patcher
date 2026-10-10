@@ -36,12 +36,30 @@ export interface PatcherState {
   /** Row ids more than one patch claims. */
   contestedRows: string[]
   generators: Array<{ id: string; description: string }>
+  /** What a patch may name: the served namespaces, the addressable rows, the installed bundles. */
+  inventory: PatcherInventory
   statuses: PatcherStatus[]
   tally: Record<PatchState, number>
   /** When the last reconcile finished, or undefined before the first one. */
   reconciledAt: string | undefined
   /** The last host-level failure, when one stopped a whole reconcile. */
   error: string | undefined
+}
+
+/**
+ * What the page can aim at.
+ *
+ * The page must never ask the operator to type a package name or a row id from
+ * memory: a typo is indistinguishable from drift, and the report would blame
+ * the spec for the operator's spelling. Everything here is read, not written.
+ */
+export interface PatcherInventory {
+  /** Namespaces the host serves with volatile fields, i.e. the settings this plugin may write. */
+  settings: string[]
+  /** Top-level rows of the profile patch file. */
+  rows: Array<{ rowId: string; name: string | undefined; enabled: boolean }>
+  /** Installed bundles with the version a file patch has to name. */
+  bundles: Array<{ pkg: string; version: string | undefined }>
 }
 
 /**
