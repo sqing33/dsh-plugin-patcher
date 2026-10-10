@@ -168,8 +168,8 @@ async function fakeHost(spec: PatcherConfig, options: { profileDir?: string } = 
 }
 
 /** apply() debounces; tests wait for the pass to actually finish. */
-async function settled(host: Fake, after?: string): Promise<PatcherState & { ok: boolean }> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+async function settled(host: Fake, after?: string, attempts = 40): Promise<PatcherState & { ok: boolean }> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25))
     const reply = await host.fetch(STATE_PATH)
     const state = JSON.parse(reply.body) as PatcherState & { reconciledAt?: string }
@@ -467,6 +467,46 @@ describe('seeding the built-in defaults', () => {
     apply(host.ctx)
     for (let attempt = 0; attempt < 8; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25))
     assert.equal(host.settings.writes.length, first)
+  })
+
+  it('asks again when the first write was refused, instead of calling the profile unwritable', async () => {
+    const host = await fakeHost(unseeded())
+    // What a cold install actually does. The seed writes through the settings
+    // layer, which writes through the profile reconcile, and that one refuses
+    // to run inside another -- so the first attempt lands inside the mount
+    // transaction this very fiber is part of, and is turned down. The refusal
+    // says nothing about whether the profile can store settings, and reporting
+    // it as the answer leaves a fresh install with no defaults and no way to
+    // tell that anything went wrong.
+    let refusals = 2
+    const real = host.settings.mutate.bind(host.settings)
+    host.settings.mutate = async (ns, ops, revision) => {
+      if (refusals > 0) {
+        refusals -= 1
+        throw new Error('HMR transactions cannot be nested')
+      }
+      return real(ns, ops, revision)
+    }
+    apply(host.ctx)
+    // Not settled(): that returns on the first pass, which here is the pass
+    // that got refused. The state being asked for is the one after a retry.
+    let state: (PatcherState & { ok: boolean }) | undefined
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      const reply = await host.fetch(STATE_PATH)
+      const seen = JSON.parse(reply.body) as PatcherState & { ok: boolean }
+      if (seen.spec?.initialized === true) {
+        state = seen
+        break
+      }
+    }
+    assert.ok(state, 'the seed never landed')
+    assert.equal(refusals, 0)
+    assert.equal(state.spec?.initialized, true)
+    assert.equal(state.spec?.patches.length, 4)
+    // And the transient refusal is not left sitting in the error slot, where
+    // it would read as the standing state of the namespace.
+    assert.equal(state.error, undefined)
   })
 
   it('leaves an emptied spec empty, which is the whole point of the flag', async () => {

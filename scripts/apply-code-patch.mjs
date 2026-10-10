@@ -19,6 +19,7 @@
 import { spawn } from 'node:child_process'
 import {
   existsSync,
+  statSync,
   readFileSync,
   writeFileSync,
   readdirSync,
@@ -233,37 +234,48 @@ function applyEdits(text, edits) {
   return out
 }
 
+/** The longest a single line is shown at, so one minified row cannot flood the report. */
+const LINE_LIMIT = 200
+
+function clipped(line) {
+  return line.length > LINE_LIMIT ? line.slice(0, LINE_LIMIT) + '... (' + line.length + ' characters)' : line
+}
+
 /**
  * A diff narrow enough to read.
  *
- * Common prefix and common suffix, not a full algorithm: these edits replace a
- * short literal in place, so the changed region is short and this shows all of
- * it. When several edits land far apart the middle is elided rather than
- * silently concatenated, because a diff that hides a change is the one failure
- * mode a dry run exists to rule out.
+ * Line-based, not character-based, and that is the whole point. The usual trick
+ * of printing the common prefix, the differing middle and the common suffix
+ * produces something unreadable for exactly the edits this script exists to
+ * apply: `execute(sessionId, line)` becoming `execute(sessionId, line, [])` is
+ * three characters in the middle of a line, and a character diff renders that
+ * as a removed empty line and an added `, []`. Which line changed, in full, is
+ * the question a dry run exists to answer. Long lines are clipped with a stated
+ * length rather than silently cut.
  */
 export function describeChange(before, after) {
+  const oldLines = before.split('\n')
+  const newLines = after.split('\n')
   let start = 0
-  const shortest = Math.min(before.length, after.length)
-  while (start < shortest && before[start] === after[start]) start++
+  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start++
   let end = 0
-  while (end < shortest - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++
+  while (
+    end < oldLines.length - start &&
+    end < newLines.length - start &&
+    oldLines[oldLines.length - 1 - end] === newLines[newLines.length - 1 - end]
+  )
+    end++
 
   const context = 2
-  const beforeLines = before.split('\n')
-  const startLine = before.slice(0, start).split('\n').length - 1
   const out = []
-  if (startLine > context) out.push('  ...')
-  for (const line of beforeLines.slice(Math.max(0, startLine - context), startLine)) out.push('  ' + line)
-  // When the two texts are the same the differing middle is empty on both
-  // sides, and slicing it would print a phantom removed and added line.
-  const changed = start < before.length - end || start < after.length - end
-  if (changed) {
-    for (const line of before.slice(start, before.length - end).split('\n')) out.push('- ' + line)
-    for (const line of after.slice(start, after.length - end).split('\n')) out.push('+ ' + line)
-  }
-  const tailFrom = Math.min(beforeLines.length, beforeLines.length - end)
-  for (const line of beforeLines.slice(tailFrom, tailFrom + context)) out.push('  ' + line)
+  if (start > context) out.push('  ...')
+  for (const line of oldLines.slice(Math.max(0, start - context), start)) out.push('  ' + clipped(line))
+  // Identical texts share every line, so both middles come out empty on their
+  // own; there is no phantom removed and added line to suppress here.
+  for (const line of oldLines.slice(start, oldLines.length - end)) out.push('- ' + clipped(line))
+  for (const line of newLines.slice(start, newLines.length - end)) out.push('+ ' + clipped(line))
+  const tailFrom = oldLines.length - end
+  for (const line of oldLines.slice(tailFrom, tailFrom + context)) out.push('  ' + clipped(line))
   if (end > context) out.push('  ...')
   return out.join('\n')
 }
@@ -339,10 +351,12 @@ export function readSource(patcherRoot, ref) {
   if (file !== root && !file.startsWith(root + sep)) {
     return { error: 'the source reference "' + ref + '" resolves outside the patcher package' }
   }
-  if (!existsSync(file)) {
+  // existsSync is true for a directory, and readFileSync on one throws EISDIR
+  // with a stack instead of the sentence every other unusable reference gets.
+  if (!existsSync(file) || !statSync(file).isFile()) {
     return {
       error:
-        'there is no file at patches/' + ref.replace(/^patches[\\/]/, '') + ' in ' + root +
+        'there is no file at ' + ref + ' in ' + root +
         '. The spec points at a file this package does not ship.',
     }
   }
@@ -412,6 +426,14 @@ export async function importSmoke(dir, pkg, profileDir) {
   // back in the edit directory where its dependencies are not. Laying out a
   // node_modules of symlinks and loading through it with --preserve-symlinks
   // makes the patched copy load exactly as it will once it is installed.
+  //
+  // Both flags, and the second is the one that was missing: --preserve-symlinks
+  // covers what the entry imports, but node still resolves the entry itself to
+  // its real path before it is loaded, so an ESM package was being judged with
+  // the edit directory as its base rather than the probe. Nothing wrong came of
+  // it in practice, because the edit directory sits inside the profile's own
+  // node_modules and the ordinary walk finds its dependencies anyway — but the
+  // check was reporting on a layout nobody will ever install.
   const probe = mkdtempSync(join(tmpdir(), 'patcher-smoke-'))
   const modules = join(probe, 'node_modules')
   const hostModules = join(profileDir, 'node_modules')
@@ -435,7 +457,12 @@ export async function importSmoke(dir, pkg, profileDir) {
       // Say the check did not happen instead of dressing it up as a verdict.
       return { status: 'skipped', detail: 'the patched copy could not be linked into a probe tree (' + error.code + ')' }
     }
-    const result = await run(process.execPath, ['--preserve-symlinks', join(modules, pkg, entry)], probe, SMOKE_TIMEOUT_MS)
+    const result = await run(
+      process.execPath,
+      ['--preserve-symlinks', '--preserve-symlinks-main', join(modules, pkg, entry)],
+      probe,
+      SMOKE_TIMEOUT_MS,
+    )
     if (result.timedOut) {
       return {
         status: 'skipped',
@@ -539,7 +566,17 @@ export async function main(argv) {
   // idempotency check is deliberate: a spec that points at a source file this
   // package does not ship has to fail by saying so, not by cheerfully
   // reporting that there is nothing left to do.
-  const sources = addedFiles.map((entry) => ({ path: entry.path, ref: entry.source, ...readSource(patcherRoot, entry.source) }))
+  // readSource hands back a `path` of its own: the file it actually opened.
+  // Spreading it over the entry would leave the destination pointing at the
+  // patcher's own copy, and every later use of this.path — the idempotency
+  // check, the write, the report — would follow it there instead of into the
+  // package. So the two names are kept apart by hand rather than by spread.
+  const sources = addedFiles.map((entry) => {
+    const read = readSource(patcherRoot, entry.source)
+    return read.error !== undefined
+      ? { path: entry.path, ref: entry.source, error: read.error }
+      : { path: entry.path, ref: entry.source, text: read.text }
+  })
   for (const source of sources) {
     if (source.error !== undefined) die('patch "' + args.patchId + '": ' + source.error)
   }

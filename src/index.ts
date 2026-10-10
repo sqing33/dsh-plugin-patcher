@@ -77,6 +77,23 @@ export const inject = ['settings']
 const DEBOUNCE_MS = 50
 
 /**
+ * How long to wait before trying the built-in seed again, and how many times.
+ *
+ * The seed writes through the settings layer, which writes through the
+ * profile's own reconcile, and that one refuses to run inside another. On a
+ * cold install the very first attempt lands inside the mount transaction this
+ * fiber is part of, so it is refused every time — and refused for a reason
+ * that has nothing to do with whether the profile can store settings at all.
+ *
+ * So the first failure is treated as a question rather than an answer, and
+ * asked again. The bound is not there to be tight; it is there so that a real
+ * refusal — a read-only profile, a namespace that will not validate — ends up
+ * on the page instead of looping until someone restarts DSH.
+ */
+const SEED_RETRY_MS = 400
+const SEED_ATTEMPTS = 30
+
+/**
  * Fibers that already own a reconcile loop.
  *
  * A settings write re-resolves this fiber's config, which can re-enter
@@ -140,6 +157,8 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
   let timer: ReturnType<typeof setTimeout> | undefined
   let busy = false
   let again = false
+  /** How many times the seed has been re-attempted since the last good one. */
+  let seedAttempts = 0
 
   const settingsPort: SettingsPort = {
     describe: () => ctx.settings.describe(),
@@ -271,11 +290,23 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
       if (needsSeed(before.config)) {
         if (defaults.patches.length > 0) {
           await seed(defaults.patches)
-          // The write lands in cordis.patch.yml, and so does everything else
-          // the settings namespace holds, which is where the apply command
-          // reads the spec from. Carry the result forward so this pass already
-          // reconciles it instead of waiting for the event to come back.
-          spec = loadSpec(ctx.settings.describe().find((d) => d.ns === namespace)?.value, generators)
+          if (seedFailure === undefined) {
+            seedAttempts = 0
+            // The write lands in cordis.patch.yml, and so does everything else
+            // the settings namespace holds, which is where the apply command
+            // reads the spec from. Carry the result forward so this pass already
+            // reconciles it instead of waiting for the event to come back.
+            spec = loadSpec(ctx.settings.describe().find((d) => d.ns === namespace)?.value, generators)
+          } else if (seedAttempts < SEED_ATTEMPTS) {
+            // The write goes through the profile's own reconcile, and that one
+            // refuses to nest. So the first attempt after a cold install races
+            // the mount transaction this very fiber is part of, and loses. The
+            // transaction ends on its own schedule, which is not ours to guess,
+            // so this waits and tries again rather than declaring the defaults
+            // unwritable. Bounded, because a real refusal has to surface.
+            seedAttempts += 1
+            schedule(SEED_RETRY_MS)
+          }
         } else {
           seedFailure =
             'there is nothing to seed: ' +
@@ -319,12 +350,12 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
     }
   }
 
-  function schedule(): void {
+  function schedule(delay = DEBOUNCE_MS): void {
     if (timer !== undefined) return
     timer = setTimeout(() => {
       timer = undefined
       void tick()
-    }, DEBOUNCE_MS)
+    }, delay)
   }
 
   function state(): PatcherState {
