@@ -13,6 +13,7 @@ import {
   configFrom,
   describeChange,
   NAMESPACE,
+  HELP,
   parseArgs,
 } from '../scripts/apply-code-patch.mjs'
 
@@ -224,6 +225,19 @@ describe('parseArgs', () => {
       { patchId: parsed.patchId, pkg: parsed.pkg, dryRun: parsed.dryRun, profileDir: parsed.profileDir },
       { patchId: 'x', pkg: 'demo', dryRun: true, profileDir: '/tmp/p' },
     )
+  })
+  it('does not install unless asked, because a bare patch commit changes nothing on disk', () => {
+    // patch-commit writes a patch file; the copy the plugins load is only
+    // rewritten by an install. Defaulting this on would make every run a slow
+    // full install, and defaulting it off silently would leave the page looking
+    // as though it had done something when it had not.
+    assert.equal(parseArgs(['--patch-id', 'x']).install, false)
+    assert.equal(parseArgs(['--patch-id', 'x', '--dry-run']).install, false)
+    assert.equal(parseArgs(['--patch-id', 'x', '--install']).install, true)
+  })
+
+  it('documents the install flag next to the others', () => {
+    assert.match(HELP, /--install\s+run pnpm install/)
   })
 })
 

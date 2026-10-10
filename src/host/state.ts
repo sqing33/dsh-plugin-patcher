@@ -7,14 +7,19 @@
  * comes from here, so there is exactly one place where "what the host thinks"
  * is defined.
  *
- * The route is read-only on purpose. A patcher that exposed writes over HTTP
- * would be a second, unaudited control channel next to the settings namespace
- * that already does the job.
+ * The route is read-only, and that is not an accident: a patcher that exposed
+ * the *spec* over HTTP would be a second, unaudited control channel next to
+ * the settings namespace that already does the job.
+ *
+ * The one write the plugin offers is not a spec write. It starts a command
+ * the operator has to ask for by name, and it lives on its own path in
+ * src/host/apply.ts, where every check between the click and the spawn is
+ * pinned by a test.
  */
 
 import type { PatcherStatus, PatchState } from '../adapters/types.ts'
 import type { SpecDiagnostic } from '../spec/resolve.ts'
-import type { PatcherConfig } from '../spec/types.ts'
+import type { Patch, PatcherConfig } from '../spec/types.ts'
 
 /** Path the browser fetches. Same origin as the harness UI, so no CORS. */
 export const STATE_PATH = '/dsh-plugin-patcher/api/state'
@@ -36,7 +41,18 @@ export interface PatcherState {
   /** Row ids more than one patch claims. */
   contestedRows: string[]
   generators: Array<{ id: string; description: string }>
-  /** What a patch may name: the served namespaces, the addressable rows, the installed bundles. */
+  /**
+   * The patches this plugin ships with, already loaded and schema-checked.
+   *
+   * The host seeds them once, when the namespace is untouched, and then they
+   * are just data: a patch an operator edited is *theirs*, and the page can
+   * only offer to add the ones that are missing. Sending them to the client
+   * for that purpose is what keeps a second copy of the built-in list from
+   * existing anywhere but in examples/.
+   */
+  defaults: Patch[]
+  /** One line per shipped example that did not load; empty when all did. */
+  defaultProblems: string[]  /** What a patch may name: the served namespaces, the addressable rows, the installed bundles. */
   inventory: PatcherInventory
   statuses: PatcherStatus[]
   tally: Record<PatchState, number>

@@ -61,7 +61,10 @@ export function parseSpecText(text: string, state: PatcherState): ParsedSpec {
   // defaults it to true, and writing back an absent key would leave the page
   // showing a patch that looks like it has no enabled state at all.
   const normalised = patches.map((patch) => ({ ...patch, enabled: patch?.enabled !== false }) as Patch)
-  const holding: PatcherState = { ...state, spec: { patches: normalised, reconcileNonce: 0 } }
+  const holding: PatcherState = {
+    ...state,
+    spec: { patches: normalised, reconcileNonce: 0, initialized: false },
+  }
   for (const patch of normalised) {
     const draft: DraftPatch = {
       id: patch.id,
@@ -80,13 +83,32 @@ export function parseSpecText(text: string, state: PatcherState): ParsedSpec {
     config: {
       patches: normalised,
       reconcileNonce: typeof nonce === 'number' && Number.isFinite(nonce) ? nonce : 0,
+      // A paste is a complete spec, so it counts as the operator having
+      // decided. Only text that says otherwise is left uninitialised, and
+      // writeOps never sends this field, so a decision made here cannot be
+      // undone by it — it only stops a fresh profile from seeding over a
+      // spec that was deliberately carried here.
+      initialized: candidate.initialized !== false,
     },
     error: undefined,
   }
 }
 
-/** The spec as text, ready to be copied out or fed to the CLI. */
+/**
+ * The spec as text, ready to be copied out or fed to the CLI.
+ *
+ * `initialized` is written even when it is false. The text is a whole spec
+ * that may be pasted into a profile that has never seen this plugin, and
+ * an unlabelled one would be indistinguishable from "nobody has chosen
+ * yet" — the host would seed its defaults straight over the paste. Naming
+ * the flag is what lets a spec travel without being mistaken for an empty
+ * namespace.
+ */
 export function formatSpecText(config: PatcherConfig | undefined): string {
-  if (config === undefined) return JSON.stringify({ patches: [], reconcileNonce: 0 }, null, 2)
-  return JSON.stringify({ patches: patchesOf(config), reconcileNonce: config.reconcileNonce }, null, 2)
+  if (config === undefined) return JSON.stringify({ patches: [], reconcileNonce: 0, initialized: false }, null, 2)
+  return JSON.stringify(
+    { patches: patchesOf(config), reconcileNonce: config.reconcileNonce, initialized: config.initialized !== false },
+    null,
+    2,
+  )
 }

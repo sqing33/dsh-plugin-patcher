@@ -8,6 +8,7 @@ import { TargetCard } from './TargetCard.tsx'
 import {
   bumpedNonce,
   groupTargets,
+  missingDefaults,
   patchesOf,
   specOf,
   validateDraft,
@@ -96,7 +97,7 @@ export function PatcherPage({ t, form }: PatcherPageProps): React.ReactElement {
     async (next: Patch[]): Promise<void> => {
       setBusy(true)
       try {
-        const accepted = await form.mutate(writeOps({ patches: next, reconcileNonce: bumpedNonce(specOf(state)) }))
+        const accepted = await form.mutate(writeOps({ ...specOf(state), patches: next, reconcileNonce: bumpedNonce(specOf(state)) }))
         if (!accepted) {
           setNotice(t('saveFailed', { message: t('notWritable') }))
           return
@@ -122,6 +123,7 @@ export function PatcherPage({ t, form }: PatcherPageProps): React.ReactElement {
   }
 
   const tally = Object.entries(state.tally).filter(([key]) => key !== 'pending' && state.tally[key as keyof typeof state.tally] > 0)
+  const absent = missingDefaults(state.defaults, patches)
 
   return (
     <div className="pp">
@@ -174,6 +176,33 @@ export function PatcherPage({ t, form }: PatcherPageProps): React.ReactElement {
           {t('lastRun', { at: state.reconciledAt ?? t('never') })}
         </span>
       </section>
+
+      {(absent.length > 0 || state.defaultProblems.length > 0) && (
+        <section className="pp__group">
+          <h3 className="pp__group-title">{t('defaultsTitle')}</h3>
+          {absent.length > 0 ? (
+            <div className="pp__actions">
+              <span className="pp__card-sub">{t('defaultsMissing', { count: String(absent.length) })}</span>
+              <button
+                type="button"
+                className="pp__btn"
+                disabled={busy}
+                onClick={() => {
+                  void write([...patches, ...absent])
+                  setTimeout(refreshPatcherState, 200)
+                }}
+              >
+                {t('action.addDefaults')}
+              </button>
+            </div>
+          ) : (
+            <p className="pp__hint">{t('defaultsNone')}</p>
+          )}
+          {state.defaultProblems.map((problem) => (
+            <p className="pp__error" key={problem}>{problem}</p>
+          ))}
+        </section>
+      )}
 
       {state.diagnostics.length > 0 && (
         <section className="pp__group">

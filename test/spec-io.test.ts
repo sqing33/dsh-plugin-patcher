@@ -126,8 +126,10 @@ describe('specOf', () => {
   })
 
   it('stands in an empty spec when the host has none', () => {
-    assert.deepEqual(specOf(stateOf()), { patches: [], reconcileNonce: 0 })
-    assert.deepEqual(specOf(stateOf({ spec: undefined })), { patches: [], reconcileNonce: 0 })
+    // A stand-in is uninitialised, so a host that has not reported a spec still
+    // looks like a fresh install to anything that asks.
+    assert.deepEqual(specOf(stateOf()), { patches: [], reconcileNonce: 0, initialized: false })
+    assert.deepEqual(specOf(stateOf({ spec: undefined })), { patches: [], reconcileNonce: 0, initialized: false })
   })
 
   it('builds a fresh stand-in per call, so two components cannot share one', () => {

@@ -31,7 +31,7 @@ import { PATCH_ID_PATTERN, type Op, type Patch, type PatcherConfig, type Target 
  * corrupting the other's.
  */
 export function specOf(state: PatcherState): PatcherConfig {
-  return state.spec ?? { patches: [], reconcileNonce: 0 }
+  return state.spec ?? { patches: [], reconcileNonce: 0, initialized: false }
 }
 
 /**
@@ -277,6 +277,23 @@ export function writeOps(next: PatcherConfig): Array<{ op: 'set'; path: string[]
     { op: 'set', path: ['patches'], value: patchesOf(next) },
     { op: 'set', path: ['reconcileNonce'], value: next.reconcileNonce },
   ]
+}
+
+/**
+ * The built-in defaults this spec does not carry yet.
+ *
+ * The page offers these but never writes them on its own: seeding is the
+ * host's job and happens once, and an operator who has cleared the list on
+ * purpose must not find it back after pressing an unrelated button. Asking
+ * first is the whole difference between a default and an ambush.
+ *
+ * Matching is by id, because that is how the spec identifies a patch
+ * everywhere else — and a default that quietly replaced a patch the
+ * operator had edited under the same id would lose their edit.
+ */
+export function missingDefaults(defaults: readonly Patch[], existing: readonly Patch[]): Patch[] {
+  const present = new Set(existing.map((patch) => patch.id))
+  return defaults.filter((patch) => !present.has(patch.id))
 }
 
 /**

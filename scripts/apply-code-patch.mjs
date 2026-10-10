@@ -35,7 +35,7 @@ function die(message) {
 }
 
 export function parseArgs(argv) {
-  const out = { profile: process.env.DSH_PROFILE ?? 'web', dryRun: false }
+  const out = { profile: process.env.DSH_PROFILE ?? 'web', dryRun: false, install: false }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const next = () => {
@@ -50,6 +50,7 @@ export function parseArgs(argv) {
     else if (arg === '--dsh-home') out.dshHome = next()
     else if (arg === '--profile-dir') out.profileDir = next()
     else if (arg === '--dry-run') out.dryRun = true
+    else if (arg === '--install') out.install = true
     else if (arg === '--help' || arg === '-h') out.help = true
     else die('unknown argument: ' + arg)
   }
@@ -67,6 +68,7 @@ export const HELP = [
   '  --dsh-home <dir>     harness home (default: DSH_HOME or ~/.dsh)',
   '  --profile-dir <dir>  profile directory; overrides --profile and --dsh-home',
   '  --dry-run            show what would change, write nothing',
+  '  --install            run pnpm install afterwards so the patched copy is the one on disk',
 ].join('\n')
 
 /**
@@ -425,7 +427,25 @@ export async function main(argv) {
 
   say('')
   say('patched ' + key + ' (' + target.path + ').')
-  say('Restart DSH to load it; the running process still has the old code.')
+
+  // patch-commit only writes the patch file and registers it. The copy that
+  // is actually installed stays untouched until something installs, so
+  // without this step the fix exists on paper and the button did nothing.
+  if (!args.install) {
+    say('Run `pnpm install` in the profile directory to put it on disk.')
+    return 0
+  }
+
+  say('installing so the patched copy is the one on disk...')
+  const install = await run('pnpm', ['install'], profileDir)
+  process.stdout.write(install.stdout)
+  process.stderr.write(install.stderr)
+  if (install.code !== 0) {
+    process.stderr.write('\npnpm install failed. The patch is committed; a later install in ' + profileDir + ' will apply it.\n')
+    return 1
+  }
+
+  say('Installed. Refresh the page: the client bundle revision is derived from the file on disk, so a reload picks the fix up without a DSH restart.')
   return 0
 }
 

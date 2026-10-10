@@ -111,6 +111,17 @@ export interface PatcherConfig {
    * separate control channel.
    */
   reconcileNonce: number
+  /**
+   * Whether anyone has ever decided what this namespace should contain.
+   *
+   * A fresh install and an operator who deleted every patch look identical in
+   * `patches` — both are an empty list — and only one of them means "back to
+   * the defaults". This flag is the difference, and it is durable: once the
+   * host has seeded the built-in defaults it never seeds again, so emptying
+   * the list is a decision rather than an accident. Nothing else reads it,
+   * and the settings page never writes it.
+   */
+  initialized: boolean
 }
 
 export const PATCH_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/

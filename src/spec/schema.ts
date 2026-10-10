@@ -114,6 +114,10 @@ const patch = z.object({
 export const patcherConfigSchema = z.object({
   patches: z.array(patch).default([]),
   reconcileNonce: z.natural().default(0),
+  // Seeded by the host on first sight of this namespace, and only then.
+  // See the comment on PatcherConfig.initialized: an empty patch list has
+  // to mean one thing or the other, and this is what picks which.
+  initialized: z.boolean().default(false),
 }).volatile()
 
 export { generatorRequest, jsonValue }

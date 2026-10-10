@@ -26,6 +26,9 @@ import { packageFileAdapter, type PackageFilePort } from './adapters/package-fil
 import { listPatchRows, patchRowAdapter, patchRowFilePort, type PatchRowSummary } from './adapters/patch-row.ts'
 import { settingsAdapter, type SettingsPort } from './adapters/settings.ts'
 import type { Adapter, PatcherStatus } from './adapters/types.ts'
+import { registerApplyRoute, type ApplyEnvironment } from './host/apply.ts'
+import { loadDefaultPatches, needsSeed, packageRootFrom, seedOps } from './host/defaults.ts'
+import { nodeRunPort } from './host/spawn.ts'
 import { Journal } from './engine/journal.ts'
 import { reconcile, type EngineAdapter, type EngineAdapters } from './engine/reconcile.ts'
 import { StatusStore } from './engine/status.ts'
@@ -34,9 +37,11 @@ import { journalPathOf, patchPathOf, profileDirFrom } from './host/profile.ts'
 import { registerStateRoute, type PatcherState } from './host/state.ts'
 import { loadSpec, type ResolvedSpec } from './spec/resolve.ts'
 import { patcherConfigSchema } from './spec/schema.ts'
-import type { PatcherConfig, Target } from './spec/types.ts'
+import type { Patch, PatcherConfig, Target } from './spec/types.ts'
 
 export { STATE_PATH, renderState, registerStateRoute, type PatcherState } from './host/state.ts'
+export { APPLY_PATH, planApply, registerApplyRoute, type RunPort } from './host/apply.ts'
+export { DEFAULT_EXAMPLE_FILES, defaultConfig, loadDefaultPatches, needsSeed } from './host/defaults.ts'
 export { journalPathOf, patchPathOf, profileDirFrom } from './host/profile.ts'
 export { createGeneratorRegistry, generatorCatalog, BUILTIN_GENERATORS } from './generators/registry.ts'
 export { reasoningLadderGenerator } from './generators/reasoning-ladder.ts'
@@ -101,6 +106,7 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
   running.add(fiber)
 
   const profileDir = profileDirFrom(import.meta.url)
+  const packageRoot = packageRootFrom(import.meta.url)
   const manager = service<Manager>(ctx, 'pluginManager')
   const configEditor = service<{ documentPath?: string }>(ctx, 'configEditor')
   const generators = createGeneratorRegistry()
@@ -115,9 +121,22 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
   let spec: ResolvedSpec = loadSpec(undefined, generators)
   let reconciledAt: string | undefined
   let failure: string | undefined
+  // Kept apart from `failure` on purpose. A failed reconcile clears itself on the
+  // next good pass, but a seed that never landed is a standing condition — the
+  // profile still has no defaults, and the next reconcile will not fix that.
+  let seedFailure: string | undefined
   let versions: Map<string, string> | undefined
   let bundles: Array<{ pkg: string; version: string | undefined }> = []
   let inventoryRows: PatchRowSummary[] = []
+  /**
+   * The one writer of an installed package's files, and the button that
+   * starts it. Both are paths into this very package; neither is a guess —
+   * a missing file simply means the page offers the command by hand.
+   */
+  const scriptPath = packageRoot === undefined ? undefined : join(packageRoot, 'scripts', 'apply-code-patch.mjs')
+  const scriptPresent = scriptPath !== undefined && existsSync(scriptPath)
+  /** The patches a fresh install starts with, and anything wrong with them. */
+  const defaults = loadDefaultPatches()
   let timer: ReturnType<typeof setTimeout> | undefined
   let busy = false
   let again = false
@@ -131,6 +150,44 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
   /** One row's enablement, through the plugin manager's own locking API. */
   const setRowEnabled = (rowId: string, enabled: boolean): Promise<void> =>
     Promise.resolve(manager?.setPluginEnabled(rowId, enabled)).then(() => undefined)
+
+  /**
+   * Write the built-in defaults into this plugin's own namespace.
+   *
+   * Through `settings.mutate` rather than the file directly, because that is
+   * the one path that holds the profile lock, validates the paths against the
+   * schema, and emits the event that schedules the next reconcile. A write
+   * that quietly did nothing — a memory-only profile, a non-loopback page —
+   * is reported instead of being mistaken for a successful seed.
+   */
+  async function seed(patches: readonly Patch[]): Promise<void> {
+    seedFailure = undefined
+    if (ctx.settings.writable === false) {
+      seedFailure =
+        'this profile keeps settings in memory, so there is nowhere to write the built-in ' +
+        'defaults. The namespace is untouched; add a patch by hand to bind one.'
+      return
+    }
+    try {
+      await ctx.settings.mutate(namespace, seedOps(patches))
+    } catch (error) {
+      seedFailure =
+        'the built-in defaults could not be written: ' +
+        (error instanceof Error ? error.message : String(error)) +
+        '. Nothing was changed.'
+      return
+    }
+    // `mutate` resolves void, and a write that was dropped resolves the same
+    // way as one that landed — so read the namespace back and believe that
+    // instead. Silently re-seeding every reconcile because a write vanished
+    // would be worse than not seeding at all.
+    const after = loadSpec(ctx.settings.describe().find((d) => d.ns === namespace)?.value, generators)
+    if (after.config?.initialized !== true) {
+      seedFailure =
+        'the built-in defaults were accepted but did not survive the write; the namespace is ' +
+        'still uninitialised. Nothing else will be written until that is understood.'
+    }
+  }
 
   const patchPath = configEditor?.documentPath ?? patchPathOf(profileDir)
   const rowPort = patchPath === undefined ? undefined : patchRowFilePort(patchPath, setRowEnabled)
@@ -190,7 +247,26 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
         versions = undefined
       }
       const raw = ctx.settings.describe().find((descriptor) => descriptor.ns === namespace)?.value
-      spec = loadSpec(raw, generators)
+      const before = loadSpec(raw, generators)
+      spec = before
+      // Seed once, on the first reconcile of a namespace nobody has written
+      // to. The flag is written in the same call as the patches, so a crash
+      // between the two cannot leave a spec that looks unseeded forever.
+      if (needsSeed(before.config)) {
+        if (defaults.patches.length > 0) {
+          await seed(defaults.patches)
+          // The write lands in cordis.patch.yml, and so does everything else
+          // the settings namespace holds, which is where the apply command
+          // reads the spec from. Carry the result forward so this pass already
+          // reconciles it instead of waiting for the event to come back.
+          spec = loadSpec(ctx.settings.describe().find((d) => d.ns === namespace)?.value, generators)
+        } else {
+          seedFailure =
+            'there is nothing to seed: ' +
+            (defaults.problems[0] ?? 'the shipped examples were all empty') +
+            '. The namespace stays as it is rather than being marked initialised with no patches in it.'
+        }
+      }
       const done = await reconcile({
         spec,
         adapters: adapters(),
@@ -247,6 +323,8 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
       rejected: [...spec.rejected],
       contestedRows: [...spec.contestedRows],
       generators: generatorCatalog(generators),
+      defaults: defaults.patches,
+      defaultProblems: defaults.problems,
       inventory: {
         settings: ctx.settings.describe().map((descriptor) => descriptor.ns).sort(),
         rows: inventoryRows,
@@ -255,7 +333,9 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
       statuses: [...statuses.list()],
       tally: statuses.tally(),
       reconciledAt,
-      error: failure,
+      // A reconcile error is the more immediate of the two, but a standing seed
+    // failure must never be the one that gets dropped.
+    error: failure ?? seedFailure,
     }
   }
 
@@ -275,6 +355,27 @@ export function apply(ctx: Context, _config: PatcherConfig = {}): void {
     warn('dsh-plugin-patcher: no web server here, so there is no state route; the settings namespace still works')
   } else {
     ctx.on('dispose', dispose)
+  }
+
+  /**
+   * The button that runs a command, wired to the page's own state.
+   *
+   * Read fresh on every request rather than captured: a reconcile that lands
+   * between the click and the check has to decide, and only the host knows.
+   */
+  const applyEnvironment = (): ApplyEnvironment => ({
+    spec: spec.config,
+    statusOf: (patchId) => statuses.get(patchId),
+    scriptPath: scriptPresent ? scriptPath : undefined,
+    profileDir,
+  })
+  const disposeApply = registerApplyRoute(ctx, {
+    read: applyEnvironment,
+    run: nodeRunPort,
+    onDone: schedule,
+  })
+  if (disposeApply !== undefined) {
+    ctx.on('dispose', disposeApply)
   }
 
   schedule()

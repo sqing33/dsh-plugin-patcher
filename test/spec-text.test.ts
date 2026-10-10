@@ -43,7 +43,13 @@ function textOf(...patches: Record<string, unknown>[]): string {
 }
 
 test('round-trips a spec through text without changing it', () => {
-  const config = { patches: [patch('a'), patch('b')] as Patch[], reconcileNonce: 7 }
+  const config = {
+    patches: [patch('a'), patch('b')] as Patch[],
+    reconcileNonce: 7,
+    // Formatted text always names the flag, so a spec that leaves this profile
+    // is not mistaken for an empty namespace and seeded over.
+    initialized: true,
+  }
   const parsed = parseSpecText(formatSpecText(config), stateOf())
   assert.equal(parsed.error, undefined)
   assert.deepEqual(parsed.config, config)
@@ -59,6 +65,16 @@ test('formatting an absent spec yields something that can be imported back', () 
   const parsed = parseSpecText(formatSpecText(undefined), stateOf())
   assert.equal(parsed.error, undefined)
   assert.deepEqual(parsed.config?.patches, [])
+})
+
+test('text that does not mention the flag is read as a decided spec', () => {
+  const parsed = parseSpecText('{"patches":[],"reconcileNonce":0}', stateOf())
+  assert.equal(parsed.config?.initialized, true)
+})
+
+test('text may say outright that nobody has decided yet', () => {
+  const parsed = parseSpecText('{"patches":[],"reconcileNonce":0,"initialized":false}', stateOf())
+  assert.equal(parsed.config?.initialized, false)
 })
 
 test('refuses text that is not JSON, and says why', () => {

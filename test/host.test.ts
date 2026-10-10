@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { apply } from '../src/index.ts'
+import { seedOps } from '../src/host/defaults.ts'
 import { journalPathOf, patchPathOf, profileDirFrom } from '../src/host/profile.ts'
 import { renderState, registerStateRoute, STATE_PATH, type PatcherState } from '../src/host/state.ts'
 import type { PatcherConfig } from '../src/spec/types.ts'
@@ -189,6 +190,9 @@ function settingsPatch(): PatcherConfig {
       },
     ],
     reconcileNonce: 0,
+    // The operator wrote this spec; without the flag the host would treat the
+    // namespace as untouched and seed its own defaults over the top.
+    initialized: true,
   }
 }
 
@@ -312,7 +316,7 @@ describe('one apply()', () => {
   })
 
   it('reconciles again when the spec namespace changes', async () => {
-    const host = await fakeHost({ patches: [], reconcileNonce: 0 })
+    const host = await fakeHost({ patches: [], reconcileNonce: 0, initialized: true })
     apply(host.ctx)
     assert.equal((await settled(host)).statuses.length, 0)
     const first = await settled(host)
@@ -347,6 +351,7 @@ describe('one apply()', () => {
         },
       ],
       reconcileNonce: 0,
+      initialized: true,
     })
     apply(host.ctx)
     const result = await settled(host)
@@ -366,6 +371,7 @@ describe('one apply()', () => {
         },
       ],
       reconcileNonce: 0,
+      initialized: true,
     })
     apply(host.ctx)
     const result = await settled(host)
@@ -410,3 +416,116 @@ describe('one apply()', () => {
     throw new Error('the host swallowed the failure instead of reporting it')
   })
 })
+describe('seeding the built-in defaults', () => {
+  /** A namespace nobody has ever written to. */
+  const unseeded = (): PatcherConfig => ({ patches: [], reconcileNonce: 0, initialized: false })
+
+  it('writes the shipped examples into a namespace that has never been used', async () => {
+    const host = await fakeHost(unseeded())
+    apply(host.ctx)
+    const state = await settled(host)
+    assert.equal(state.spec?.initialized, true)
+    assert.equal(state.spec?.patches.length, 3)
+    // The three hand-edits this profile actually carries, so the page is not
+    // empty on a fresh install and the operator can see what the plugin is for.
+    assert.deepEqual(state.spec?.patches.map((patch) => patch.id), [
+      'plan-build-switch-command-arity',
+      'subagent-roles-configforms',
+      'think-translate-icons-and-seat',
+    ])
+  })
+
+  it('seeds through the settings service, not by touching the file', async () => {
+    const host = await fakeHost(unseeded())
+    apply(host.ctx)
+    const state = await settled(host)
+    assert.equal(host.settings.writes.length, 1)
+    assert.equal(host.settings.writes[0]?.ns, 'dsh-plugin-patcher')
+    // One batch, list and flag together: two writes would leave a window where a
+    // crash makes the host believe it has never seeded.
+    assert.deepEqual(host.settings.writes[0]?.ops, seedOps(state.spec?.patches ?? []))
+  })
+
+  it('reconciles what it just seeded, without waiting for the write to echo back', async () => {
+    const host = await fakeHost(unseeded())
+    apply(host.ctx)
+    const state = await settled(host)
+    // The seeded patches name real packages; this profile has one, so every one
+    // of them lands on a state the operator can act on rather than on nothing.
+    assert.equal(state.statuses.length, 3)
+    for (const status of state.statuses) assert.notEqual(status.state, 'pending')
+  })
+
+  it('seeds exactly once, no matter how many reconciles follow', async () => {
+    const host = await fakeHost(unseeded())
+    apply(host.ctx)
+    await settled(host)
+    const first = host.settings.writes.length
+    host.emit('settings/document-updated', 'dsh-plugin-patcher', 1)
+    await settled(host)
+    apply(host.ctx)
+    for (let attempt = 0; attempt < 8; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25))
+    assert.equal(host.settings.writes.length, first)
+  })
+
+  it('leaves an emptied spec empty, which is the whole point of the flag', async () => {
+    const host = await fakeHost(unseeded())
+    apply(host.ctx)
+    const seeded = await settled(host)
+    // The operator deletes every patch. Nothing should come back.
+    await host.settings.mutate('dsh-plugin-patcher', [{ op: 'set', path: ['patches'], value: [] }])
+    const before = host.settings.writes.length
+    host.emit('settings/document-updated', 'dsh-plugin-patcher', 2)
+    const emptied = await settled(host, seeded.reconciledAt)
+    assert.deepEqual(emptied.spec?.patches, [])
+    assert.equal(emptied.spec?.initialized, true)
+    assert.equal(emptied.statuses.length, 0)
+    // The seed ran once and the deletion was the only write since; a re-seed
+    // would show up here as one more.
+    assert.equal(host.settings.writes.length, before)
+  })
+
+  it('never overwrites a spec that failed to load', async () => {
+    const host = await fakeHost({ patches: [{ id: 'bad' }], reconcileNonce: 0 } as never)
+    apply(host.ctx)
+    const state = await settled(host)
+    // Unparseable input is not an empty namespace. Seeding it would destroy
+    // whatever the operator was trying to say, and there is no second chance.
+    assert.equal(host.settings.writes.length, 0)
+    assert.equal(state.spec, undefined)
+    assert.ok(state.diagnostics.length > 0)
+  })
+
+  it('says so, and changes nothing, when the profile keeps settings in memory', async () => {
+    const host = await fakeHost(unseeded())
+    host.settings.writable = false
+    apply(host.ctx)
+    const state = await settled(host)
+    assert.equal(host.settings.writes.length, 0)
+    assert.equal(state.spec?.initialized, false)
+    assert.match(String(state.error), /in memory/)
+  })
+
+  it('reports a write that was accepted but did not land', async () => {
+    const host = await fakeHost(unseeded())
+    // A mutate that resolves without storing anything is what a dropped write
+    // looks like from here, and believing it would re-seed on every pass.
+    host.settings.mutate = async () => {
+      host.settings.writes.push({ ns: 'dsh-plugin-patcher', ops: [] })
+    }
+    apply(host.ctx)
+    const state = await settled(host)
+    assert.match(String(state.error), /did not survive the write/)
+  })
+
+  it('offers the defaults on the page as data, not as an instruction', async () => {
+    const host = await fakeHost({ patches: [], reconcileNonce: 0, initialized: true })
+    apply(host.ctx)
+    const state = await settled(host)
+    // Seeded or not, the page can always show what would be there, so an
+    // operator who cleared the list can get it back without a reinstall.
+    assert.equal(state.defaults.length, 3)
+    assert.deepEqual(state.defaultProblems, [])
+  })
+})
+

@@ -60,11 +60,38 @@ node scripts/apply-code-patch.mjs --patch-id reasoning-ladder --pkg dsh-reasonin
 | `subagent-roles-configforms.json` | `dsh-plugin-subagent-roles` 绑的是 0.1.7 已经删掉的 `ctx.settingsScope` | `in-sync` —— 该 profile 已经带着这个补丁 |
 | `think-translate-icons-and-seat.json` | `dsh-think-translate` 找的是 0.1.7 之前的图标导出，现在全是 null | `in-sync` —— 靠 `file:` vendor 加一个校验和脚本带着的 |
 
-把第二条第三条声明出来，取代的就是那个校验脚本：它们的修复从来没进过 manifest，所以没有任何东西在看着它们；现在宿主每次 reconcile 都会重读这两个文件，并在页面上说出来。第一条是例外，它的修复要通过 CLI 落一次地。
+把第二条第三条声明出来，取代的就是那个校验脚本：它们的修复从来没进过 manifest，所以没有任何东西在看着它们；现在宿主每次 reconcile 都会重读这两个文件，并在页面上说出来。第一条是例外，它的修复得落一次地 —— 走 CLI，或者走卡片上那两个按钮，它们跑的就是同一个 CLI。
 
 三条里每一个 `find` 都对着「发布时的样子」和「现在装在 node_modules 里的样子」各核了一遍。已经修好的那两条读出来是 `in-sync`，没修的那条读出来是 `drifted`，并打印出能落地的命令。
 
 会插入内容的 edit 写成「找到这个锚点，换成锚点加新增的几行」，所以它落完之后，find 还在——就坐在自己那份替换文本里面。漂移检查判的是这个包含关系，而不是 find 有没有消失；否则每一段插入都会被读成「还没改」，CLI 就会再插一遍。
+
+## 装上就有的三条
+
+空 spec 等于什么都不看，所以第一次启动时宿主会把 `examples/` 里的三条写进本插件自己的命名空间，写完当轮就 reconcile。
+
+种一次，靠的是 spec 里的 `initialized` 标志：它在的时候是「有人做过选择」，宿主一个字都不再动。所以你把列表清空，清空就是清空，不会因为下次重启又被塞回来。spec 读不出来（坏了）的时候也绝不覆盖 —— 宁可什么都不写，也不能拿默认值盖掉一份操作者改过的东西。
+
+从旧版本升上来也走同一条路：老 spec 里没有这个字段，`initialized` 缺省成 false，也就是「还没种过」，所以升级后第一次启动会补种一次。已经带着手改补丁的 profile 补进来的是三条同样 in-sync 的声明，reconcile 之后状态不变。
+
+默认值不会自己往回跑。操作者清空之后想再加回来，页面上有「补全内置默认」这一条路，但那是一个要人点的动作 —— 默认值和突袭之间差的就是这一下。
+
+## 页面上那两个按钮
+
+`package-file` 补丁漂移时，卡片上会出现两个按钮：
+
+- **先看改动** —— 跑一遍 `--dry-run`，打印 diff 然后丢掉，什么都不写。
+- **应用修复** —— 跑真正的命令，末尾带 `--install`（`pnpm patch-commit` 只产出补丁文件，装好的副本要等 install 才对）。
+
+这是整个插件唯一会启动子进程的地方，所以值得说清楚它凭什么安全：
+
+- 请求体只有 `{ patchId, dryRun }`。**argv 完全由宿主从 spec 拼出来** —— 页面永远不能指定一个要执行什么。
+- 必须带自定义头 `x-dsh-plugin-patcher`。不带预检的跨域页面设不出这个头，于是那个响应本来就过不去。
+- 一次只跑一个。第二个请求是 409，因为 pnpm 持着 profile 的锁，两个一起来只会互相抢。
+- 三重上限：请求体 4 KiB、输出 60 000 字符（超了保尾部，失败信息在最后）、5 分钟超时（SIGTERM，5 秒后 SIGKILL）。
+- 真跑只接受 `drifted`；预览接受 `drifted`/`conflict`/`failed`。已经是 `in-sync` 的补丁点下去没有意义，接口直接拒。
+
+跑完的输出原样回到页面上。pnpm 失败时 stderr 就是全部价值，所以它不会被压扁成一句「出错了」。
 
 ## 安装
 
@@ -79,7 +106,7 @@ bundle 自带 `cordis.patch.yml` 会注册自己的 profile 行，不需要手�
 - **没有 journal 就不写。** journal 写不进去，apply 根本不会执行。
 - **命中次数必须精确。** 代码编辑必须只命中一次；0 次和 2 次都拒绝，绝不靠猜。
 - **spec 是唯一的写通道。** 页面与宿主共用一个字符串，`scripts/verify-package.mjs` 会在两者不再一致时失败。
-- **宿主不跑 pnpm。** 代码补丁由另一个进程落地，命令是看页面的人敲的。
+- **宿主不跑 pnpm。** 它自己不执行任何 pnpm；有人点了按钮，它才起一个独立进程跑 `scripts/apply-code-patch.mjs`，而那个脚本是唯一碰 pnpm 的地方。
 
 ## 开发
 

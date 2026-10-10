@@ -60,11 +60,38 @@ One patch ships as a generator rather than a fixed value: the reasoning-effort l
 | `subagent-roles-configforms.json` | `dsh-plugin-subagent-roles` binds `ctx.settingsScope`, which 0.1.7 removed | `in-sync` — the profile already carries the patch |
 | `think-translate-icons-and-seat.json` | `dsh-think-translate` looks up pre-0.1.7 icon exports that now resolve to null | `in-sync` — carried as a `file:` vendor plus a checksum guard script |
 
-Declaring the second and third is what replaces the guard script. Their fixes were never in the manifest, so nothing was checking them; now the host re-reads both files on every reconcile and says so on the page. The first one is the exception: its fix has to land once, through the CLI.
+Declaring the second and third is what replaces the guard script. Their fixes were never in the manifest, so nothing was checking them; now the host re-reads both files on every reconcile and says so on the page. The first one is the exception: its fix has to land once, through the CLI — or through the card's two buttons, which run that same CLI.
 
 Every `find` in all three was checked against the package as published and as installed. The two that are already fixed read `in-sync`; the one that is not reads `drifted` and prints the command that lands it.
 
 An edit that inserts is written as "find this anchor, replace it with the anchor plus the new lines", so after it lands the find is still sitting inside its own replacement. The drift check looks for that containment rather than for the find having vanished, otherwise every inserted block would read as still missing and the CLI would insert it twice.
+
+## The three that ship
+
+An empty spec watches nothing, so the first start writes the three files in `examples/` into the plugin's own namespace and reconciles them in the same pass.
+
+It happens once, and the flag that says so is `initialized` in the spec: while it is there the spec records a decision somebody made, and the host writes nothing. Clearing the list therefore clears it — the defaults do not come back on the next restart. A spec that fails to load is never overwritten either; writing nothing beats replacing an operator's edits with a default.
+
+Upgrading from an older version takes the same path: the old spec has no such field, so `initialized` defaults to false and the first start after the upgrade seeds once. A profile already carrying the hand-edits receives three declarations that read `in-sync` there, so the reconcile changes no state.
+
+The defaults never put themselves back. If you emptied the list and want it again, the page offers "add the built-in defaults" — a button somebody presses. That click is the whole difference between a default and an ambush.
+
+## The two buttons on a card
+
+When a `package-file` patch has drifted, its card shows two:
+
+- **See the change** — runs `--dry-run`, prints the diff and throws it away. Nothing is written.
+- **Apply the fix** — runs the real command, with `--install` at the end (`pnpm patch-commit` only writes the patch file; the installed copy waits for an install).
+
+This is the only place in the plugin that starts a process, so it is worth being precise about what makes it safe:
+
+- The request body is `{ patchId, dryRun }` and nothing else. **The argv is built by the host out of the spec** — the page can never name what gets executed.
+- The `x-dsh-plugin-patcher` header is required. A cross-origin page cannot set one without a preflight this server does not answer.
+- One at a time. A second request is 409, because pnpm holds the profile lock and two installs would fight over it.
+- Three ceilings: a 4 KiB body, 60 000 characters of output (the tail is kept — that is where a failure explains itself), and a 5 minute deadline (SIGTERM, then SIGKILL after 5 seconds).
+- A real run only accepts `drifted`; a preview accepts `drifted`, `conflict` or `failed`. A patch that is already in sync is refused rather than run for nothing.
+
+The child's output comes back to the page verbatim. When pnpm fails, its stderr is the entire value of having clicked, so it is not flattened into "something went wrong".
 
 ## Installation
 
@@ -79,7 +106,7 @@ The bundle registers its own profile row through `cordis.patch.yml`, so there is
 - **Nothing is written without a journal entry first.** If the journal cannot be written, the apply is not attempted.
 - **Counts are exact.** A code edit must match exactly once; zero matches and two matches are both refused rather than resolved by guessing.
 - **The spec is the only write channel.** Page and host agree on one string, and `scripts/verify-package.mjs` fails if they ever stop agreeing.
-- **The host does not run pnpm.** Applying a code patch is a separate process, started by whoever is reading the page.
+- **The host runs no pnpm of its own.** It executes nothing itself; when somebody clicks, it starts one separate process running `scripts/apply-code-patch.mjs`, and that script is the only place pnpm is ever touched.
 
 ## Development
 

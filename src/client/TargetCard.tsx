@@ -3,6 +3,8 @@
 import type { Patch } from '../spec/types.ts'
 import type { PatcherStatus } from '../adapters/types.ts'
 import { toneOf, type TargetGroup } from './spec-io.ts'
+import { applyPatch, useApply } from './apply.ts'
+import { applyOutput } from './apply-wire.ts'
 import type { T } from './ns.ts'
 
 export interface TargetCardProps {
@@ -28,6 +30,17 @@ const HINT_KEY: Partial<Record<PatcherStatus['state'], string>> = {
   failed: 'hint.failed',
 }
 
+/**
+ * Whether the one-click fix applies to this patch at all.
+ *
+ * Only a file target carrying code edits: the host rewrites those and is the
+ * only thing that can, while a settings or row patch is applied by the
+ * reconcile itself and would report the same state either way.
+ */
+function fixable(patch: Patch): boolean {
+  return patch.target.kind === 'package-file' && patch.op.kind === 'code'
+}
+
 function Chip({ t, status }: { t: T; status: PatcherStatus | undefined }): React.ReactElement | null {
   if (status === undefined) return null
   return (
@@ -38,6 +51,7 @@ function Chip({ t, status }: { t: T; status: PatcherStatus | undefined }): React
 }
 
 export function TargetCard({ t, group, unclaimed, onEdit, onRemove, onToggle, onBind }: TargetCardProps): React.ReactElement {
+  const apply = useApply()
   if (unclaimed === true) {
     return (
       <div className="pp__card pp__card--quiet">
@@ -88,6 +102,32 @@ export function TargetCard({ t, group, unclaimed, onEdit, onRemove, onToggle, on
                   </>
                 )}
               </p>
+            )}
+            {fixable(entry.patch) && status?.state === 'drifted' && (
+              <div className="pp__actions">
+                <button
+                  type="button"
+                  className="pp__btn"
+                  disabled={apply.running !== undefined}
+                  onClick={() => void applyPatch(entry.patch.id, true)}
+                >
+                  {t('action.preview')}
+                </button>
+                <button
+                  type="button"
+                  className="pp__btn"
+                  data-variant="primary"
+                  disabled={apply.running !== undefined}
+                  onClick={() => void applyPatch(entry.patch.id, false)}
+                >
+                  {apply.running === entry.patch.id && !apply.previewing ? t('action.applying') : t('action.apply')}
+                </button>
+              </div>
+            )}
+            {apply.result !== undefined && apply.patchId === entry.patch.id && (
+              <pre className="pp__output" data-ok={apply.result.ok ? 'true' : 'false'}>
+                {applyOutput(apply.result)}
+              </pre>
             )}
             <div className="pp__actions">
               <button type="button" className="pp__btn" onClick={() => onEdit(entry.patch)}>
