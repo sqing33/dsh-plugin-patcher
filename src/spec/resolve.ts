@@ -60,10 +60,19 @@ export interface ResolvedSpec {
   contestedRows: ReadonlySet<string>
 }
 
+/**
+ * Which operations each target can carry.
+ *
+ * package-file is not offered verify-only. That operation carries no payload,
+ * so on a file it would have nothing to look for and could only ever report
+ * success — an assertion that cannot fail is worse than no assertion, because
+ * it reads like a check. The version pin on a package-file target is the real
+ * assertion: a package that moved on shows up as unsupported, not silent.
+ */
 const TARGET_OPS: Record<Target['kind'], readonly Op['kind'][]> = {
   settings: ['set', 'unset', 'verify-only'],
   'patch-row': ['merge-config', 'set-enabled', 'verify-only'],
-  'package-file': ['code', 'verify-only'],
+  'package-file': ['code'],
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
