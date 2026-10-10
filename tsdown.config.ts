@@ -1,7 +1,7 @@
 import { defineConfig, type UserConfig } from 'tsdown'
 
 const hostConfig: UserConfig = {
-  name: 'dsh-reasoning-ladder',
+  name: 'dsh-plugin-patcher',
   entry: ['src/index.ts'],
   outDir: 'lib',
   format: ['esm'],

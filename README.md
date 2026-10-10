@@ -1,4 +1,4 @@
-# dsh-reasoning-ladder
+# dsh-plugin-patcher
 
 Forces a fixed five-rung reasoning-effort ladder into DeepSeek Harness.
 
@@ -40,7 +40,7 @@ this plugin keeps owning the values behind it.
 ## Installation
 
 ```bash
-dsh plugin add github:sqing33/dsh-reasoning-ladder
+dsh plugin add github:sqing33/dsh-plugin-patcher
 ```
 
 ## Configuration
@@ -49,8 +49,8 @@ Every key is optional. The default configuration is the five-rung ladder
 applied everywhere.
 
 ```yaml
-- id: reasoning-ladder
-  name: dsh-reasoning-ladder
+- id: dsh-plugin-patcher
+  name: dsh-plugin-patcher
   config:
     # false = only touch providers listed under `providers`
     auto: true

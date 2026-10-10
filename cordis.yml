@@ -1,7 +1,7 @@
 # Optional overlay for a DeepSeek Harness web composition.
-# Usage: dsh web --patch dsh-reasoning-ladder/cordis.yml
+# Usage: dsh web --patch dsh-plugin-patcher/cordis.yml
 
 - insert:
-    - id: reasoning-ladder
+    - id: dsh-plugin-patcher
       name: './src/index.ts'
       config: {}

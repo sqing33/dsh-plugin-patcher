@@ -21,7 +21,7 @@ import { recordError, recordPatchWrite } from './status.ts'
 import type { Efforts, LadderConfig } from './reasoning-settings.ts'
 
 const PATCH_ENTRY_ID = 'llm-pi-ai'
-const LOG_PREFIX = '[dsh-reasoning-ladder]'
+const LOG_PREFIX = '[dsh-plugin-patcher]'
 
 const indentOf = (line: string): number => line.length - line.replace(/^ +/, '').length
 

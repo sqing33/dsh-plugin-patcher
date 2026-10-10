@@ -1,11 +1,10 @@
 /**
- * dsh-reasoning-ladder — a reasoning-effort ladder for DeepSeek Harness.
+ * dsh-plugin-patcher — a declarative patcher for DeepSeek Harness.
  *
- * This plugin exists so the effort ladder can live outside the plugin that
- * renders the selector. Install upstream dsh-reasoning-effort for the client
- * UI (configure it with auto: false so it never writes settings) and install
- * this plugin as the single writer of the llm-pi-ai settings namespace and of
- * the profile's cordis.patch.yml.
+ * The patch spec lives in this plugin's own settings namespace, so a client
+ * page can drive the host simply by editing that namespace. The bundled
+ * reasoning-effort ladder is the first patch shipped with it, and is kept
+ * behaviourally identical to the former standalone dsh-reasoning-ladder.
  *
  * The ladder itself is off / medium / high / xhigh / max: a five-rung ladder
  * whose bottom rung is 'off' rather than 'low'.
@@ -22,7 +21,7 @@ export { getStatus, type LadderStatus } from './status.ts'
 export type { LadderConfig, LadderTargets } from './reasoning-settings.ts'
 
 export const Config = ladderConfigSchema
-export const name = 'reasoning-ladder'
+export const name = 'dsh-plugin-patcher'
 export const inject = ['settings']
 
 export function apply(ctx: Context, config: LadderConfig = {}): void {

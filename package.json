@@ -1,7 +1,7 @@
 {
-  "name": "dsh-reasoning-ladder",
+  "name": "dsh-plugin-patcher",
   "version": "0.1.0",
-  "description": "Forces a five-rung reasoning-effort ladder (off/medium/high/xhigh/max) into DeepSeek Harness llm-pi-ai settings and the profile patch.",
+  "description": "Declarative patcher for DeepSeek Harness: rewrites settings namespaces, profile patch rows, and other plugins' package files from one spec, with drift detection and per-patch rollback.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -21,28 +21,28 @@
     "dsh-plugin",
     "deepseek",
     "deepseek-harness",
-    "reasoning-effort",
-    "reasoning-ladder",
-    "model-settings",
-    "llm-pi-ai",
+    "plugin-patcher",
+    "patch",
+    "drift",
+    "rollback",
     "typescript",
     "cordis"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sqing33/dsh-reasoning-ladder.git"
+    "url": "git+https://github.com/sqing33/dsh-plugin-patcher.git"
   },
   "bugs": {
-    "url": "https://github.com/sqing33/dsh-reasoning-ladder/issues"
+    "url": "https://github.com/sqing33/dsh-plugin-patcher/issues"
   },
-  "homepage": "https://github.com/sqing33/dsh-reasoning-ladder#readme",
+  "homepage": "https://github.com/sqing33/dsh-plugin-patcher#readme",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "build": "tsdown",
-    "test": "node --experimental-strip-types --test test/reasoning-settings.test.ts test/patch-rewrite.test.ts test/golden.test.ts",
+    "test": "node --experimental-strip-types --test \"test/*.test.ts\"",
     "verify": "node scripts/verify-package.mjs",
     "prepublishOnly": "pnpm run build && pnpm test && pnpm run verify"
   },

@@ -1,4 +1,4 @@
-# dsh-reasoning-ladder
+# dsh-plugin-patcher
 
 为 DeepSeek Harness 强制写入固定的五档思维强度阶梯。
 
@@ -37,7 +37,7 @@
 ## 安装
 
 ```bash
-dsh plugin add github:sqing33/dsh-reasoning-ladder
+dsh plugin add github:sqing33/dsh-plugin-patcher
 ```
 
 ## 配置
@@ -45,8 +45,8 @@ dsh plugin add github:sqing33/dsh-reasoning-ladder
 所有键都是可选的，默认配置就是「五档阶梯 + 全局生效」。
 
 ```yaml
-- id: reasoning-ladder
-  name: dsh-reasoning-ladder
+- id: dsh-plugin-patcher
+  name: dsh-plugin-patcher
   config:
     # false = 只处理 providers 里显式列出的 provider
     auto: true

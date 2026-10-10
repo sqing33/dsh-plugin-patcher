@@ -1,8 +1,10 @@
-# Bundle patch for dsh-reasoning-ladder.
-# Registers the plugin with a no-config default: the ladder is a pure
-# function of the five-rung defaults, so an empty config is correct here.
+# Bundle patch for dsh-plugin-patcher.
+# The row id is also this plugin's settings namespace, so the client settings
+# page can address the patch spec without a second name to keep in sync.
+# An empty config is correct: the ladder is a pure function of the five-rung
+# defaults, and an empty spec list simply means "nothing is bound yet".
 
 - insert:
-    - id: reasoning-ladder
-      name: dsh-reasoning-ladder
+    - id: dsh-plugin-patcher
+      name: dsh-plugin-patcher
       config: {}

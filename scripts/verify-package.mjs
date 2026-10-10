@@ -55,10 +55,14 @@ const built = await readFile(resolve(root, 'lib/index.js'), 'utf8')
 if (built.includes('import { settingsNamespace')) {
   fail('host bundle still imports the removed settingsNamespace runtime helper')
 }
-if (!built.includes('reasoning-ladder')) fail('host bundle does not register the reasoning-ladder plugin')
+if (!built.includes('dsh-plugin-patcher')) fail('host bundle does not register the dsh-plugin-patcher plugin')
 if (built.includes('__ModuleLoader__')) fail('this plugin must not ship a client bundle')
 
 const patch = await readFile(resolve(root, patchPath), 'utf8')
-if (!patch.includes('name: dsh-reasoning-ladder')) fail('bundle patch must register dsh-reasoning-ladder')
+if (!patch.includes('name: dsh-plugin-patcher')) fail('bundle patch must register dsh-plugin-patcher')
+if (!patch.includes('id: dsh-plugin-patcher')) {
+  fail('the bundle patch row id must equal the settings namespace dsh-plugin-patcher')
+}
+if (patch.includes('reasoning-ladder')) fail('the bundle patch still carries the retired reasoning-ladder row id')
 
 if (process.exitCode !== 1) console.log('Package structure is valid.')
