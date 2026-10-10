@@ -42,13 +42,22 @@ for (const path of ['lib/index.js', 'README.md', 'README.zh.md', 'LICENSE']) {
   if (!(await exists(resolve(root, path)))) fail('required file does not exist: ' + path)
 }
 
-const hostSource = await readFile(resolve(root, 'src/reasoning-settings.ts'), 'utf8')
-if (hostSource.includes('import { settingsNamespace')) {
-  fail('host must not import the removed settingsNamespace runtime helper')
+for (const path of ['src/reasoning-settings.ts', 'src/index.ts', 'src/spec/schema.ts']) {
+  const source = await readFile(resolve(root, path), 'utf8')
+  if (source.includes('import { settingsNamespace')) {
+    fail('host must not import the removed settingsNamespace runtime helper: ' + path)
+  }
 }
-const syncSource = await readFile(resolve(root, 'src/settings-sync.ts'), 'utf8')
-if (!syncSource.includes("PI_AI_NAMESPACE = 'llm-pi-ai'")) {
-  fail('the settings sync must target the llm-pi-ai namespace literal')
+const hostEntry = await readFile(resolve(root, 'src/index.ts'), 'utf8')
+if (!hostEntry.includes("export const namespace = name")) {
+  fail('the settings namespace and the profile row id must be the same exported name')
+}
+if (!hostEntry.includes('patcherConfigSchema')) {
+  fail('the plugin Config must be the spec schema, not the retired ladder schema')
+}
+const specSchema = await readFile(resolve(root, 'src/spec/schema.ts'), 'utf8')
+if (!/\)\s*\.volatile\(\)/.test(specSchema.split('patcherConfigSchema =')[1] ?? '')) {
+  fail('the spec schema root must be volatile, or dsh-settings refuses every write')
 }
 
 const built = await readFile(resolve(root, 'lib/index.js'), 'utf8')
