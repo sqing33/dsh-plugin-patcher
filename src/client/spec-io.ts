@@ -24,14 +24,21 @@ import { PATCH_ID_PATTERN, type Op, type Patch, type PatcherConfig, type Target 
 /**
  * The spec the host last resolved, or an empty one.
  *
- * A host that has not loaded a spec yet — first poll, or a namespace that
- * failed its schema — still has to render a page, so the fallback is a real
- * empty config rather than undefined. It is built per call: one shared empty
- * object handed to two components is one component's array splice away from
- * corrupting the other's.
+ * A host that has not answered yet — the first render happens before the first
+ * poll returns — still has to render a page, so the fallback is a real empty
+ * config rather than undefined. It is built per call: one shared empty object
+ * handed to two components is one component's array splice away from corrupting
+ * the other's.
+ *
+ * The state argument is optional on purpose, and that is a bug this signature
+ * was rewritten to prevent: a component computes the patch list above the
+ * branch that waits for the host, so it calls this with nothing and the page
+ * dies in the first frame. A missing state and a state with no spec are the
+ * same thing to every caller here — there is nothing to show — so they take
+ * the same answer.
  */
-export function specOf(state: PatcherState): PatcherConfig {
-  return state.spec ?? { patches: [], reconcileNonce: 0, initialized: false }
+export function specOf(state: PatcherState | undefined): PatcherConfig {
+  return state?.spec ?? { patches: [], reconcileNonce: 0, initialized: false }
 }
 
 /**
