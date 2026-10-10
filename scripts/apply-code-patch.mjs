@@ -22,6 +22,7 @@ import {
   statSync,
   readFileSync,
   writeFileSync,
+  appendFileSync,
   readdirSync,
   mkdirSync,
   mkdtempSync,
@@ -378,6 +379,68 @@ export function assessFile(installed, source) {
 }
 
 /**
+ * Drop one edit directory from pnpm's patch bookkeeping.
+ *
+ * pnpm records every `pnpm patch` directory in .pnpm_patches/state.json, and a
+ * `patch-commit` that finds state naming a directory which is not there exits
+ * non-zero having printed nothing at all. Removing the directory by hand —
+ * which is what a person does when they are cleaning up, and what a previous
+ * run of this script did — leaves exactly that state behind, so the failure
+ * outlives the thing that caused it. Other entries are other packages'
+ * business and are left alone; a file that no longer parses is left alone
+ * too, because rewriting pnpm's file on a guess is worse than a stale entry
+ * that this same function will clean on the next run.
+ */
+export function forgetPatchState(editRoot, editDir) {
+  const statePath = join(editRoot, 'state.json')
+  if (!existsSync(statePath)) return false
+
+  let state
+  try {
+    state = JSON.parse(readFileSync(statePath, 'utf8'))
+  } catch {
+    return false
+  }
+  if (state === null || typeof state !== 'object' || Array.isArray(state)) return false
+  if (Object.hasOwn(state, editDir) === false) return false
+
+  delete state[editDir]
+  writeFileSync(statePath, JSON.stringify(state, undefined, 2) + '\n')
+  return true
+}
+
+/**
+ * A unified diff that creates a file, for a file the package never had.
+ *
+ * `pnpm patch-commit` only emits hunks for files the extracted package
+ * already contained, so a patch that adds a module comes out of it silently
+ * short: the diff is applied, the import lands, and the module is missing —
+ * a plugin that fails to load for a reason the patch file does not show.
+ * pnpm's own applier accepts this shape, so the hunk is written here and
+ * appended to the committed patch.
+ *
+ * The text is emitted verbatim: a line that does not end in a newline gets
+ * git's no-newline marker rather than a silently added one, because a file
+ * that gains a byte it never had is a different file.
+ */
+export function newFileHunk(relativePath, text) {
+  const body = text.endsWith('\n') ? text.slice(0, -1) : text
+  const count = body === '' ? 0 : body.split('\n').length
+  const added = count === 0 ? [] : body.split('\n').map((line) => `+${line}`)
+  const tail = text.endsWith('\n') || body === '' ? [] : ['\\ No newline at end of file']
+  return [
+    `diff --git a/${relativePath} b/${relativePath}`,
+    'new file mode 100644',
+    '--- /dev/null',
+    `+++ b/${relativePath}`,
+    ...(count === 0 ? [] : [`@@ -0,0 +1,${count} @@`]),
+    ...added,
+    ...tail,
+    '',
+  ].join('\n')
+}
+
+/**
  * Parse-check a file that is already sitting where it will be published.
  *
  * Checking the real path rather than a copy in a temp directory means the
@@ -621,9 +684,14 @@ export async function main(argv) {
 
   // pnpm extracts into a deterministic directory and refuses to reuse a
   // non-empty one, so a run that died before patch-commit leaves a directory
-  // that makes every later run fail. Clearing it is the repair.
+  // that makes every later run fail. Clearing it is the repair — and clearing
+  // only the directory is not enough: pnpm also keeps a bookkeeping entry in
+  // .pnpm_patches/state.json, and a commit that finds a state naming a
+  // directory that is not there fails without saying why.
   const editRoot = join(profileDir, 'node_modules', '.pnpm_patches')
-  rmSync(join(editRoot, target.pkg + '@' + target.version), { recursive: true, force: true })
+  const editDir = join(editRoot, target.pkg + '@' + target.version)
+  rmSync(editDir, { recursive: true, force: true })
+  forgetPatchState(editRoot, editDir)
 
   const extracted = await run('pnpm', ['patch', target.pkg + '@' + target.version], profileDir)
   if (extracted.code !== 0) {
@@ -711,9 +779,26 @@ export async function main(argv) {
     die('pnpm patch-commit failed. The edits are in ' + dir + ' and were not committed.')
   }
 
+  // patch-commit never mentions a file the package did not already have, so
+  // every new file this run wrote is appended to the patch by hand. Without
+  // it the next install drops the file while keeping the import that needs
+  // it, and the plugin stops loading.
+  const key = target.pkg + '@' + target.version
+  const added = written.filter((entry) => entry.before === undefined)
+  if (added.length > 0) {
+    const patchFile = join(profileDir, 'patches', key + '.patch')
+    if (!existsSync(patchFile)) {
+      die('pnpm did not write ' + patchFile + ', so the new file cannot be recorded.')
+    }
+    const hunks = added
+      .map((entry) => newFileHunk(entry.path, entry.after))
+      .join('\n')
+    appendFileSync(patchFile, hunks)
+    say('appended ' + added.map((entry) => entry.path).join(', ') + ' to ' + patchFile)
+  }
+
   const workspacePath = join(profileDir, 'pnpm-workspace.yaml')
   const registered = existsSync(workspacePath) ? readFileSync(workspacePath, 'utf8') : ''
-  const key = target.pkg + '@' + target.version
   if (!registered.includes(key)) {
     process.stderr.write(
       'pnpm did not register ' + key + ' under patchedDependencies in ' + workspacePath + '.\n' +

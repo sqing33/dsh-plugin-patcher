@@ -13,7 +13,9 @@ import {
   assessFile,
   configFrom,
   describeChange,
+  forgetPatchState,
   importSmoke,
+  newFileHunk,
   NAMESPACE,
   HELP,
   packageRoot,
@@ -991,4 +993,79 @@ describe('adding a whole file', () => {
     assert.match(result.stderr, /does not ship/)
     assert.deepEqual(calls(fixture), [])
   })
+
+
+/**
+ * `pnpm patch-commit` diffs the extracted package against the package as it
+ * shipped, so a file the package never had produces no hunk at all. The
+ * commit is then short one file while keeping the import that needs it, and
+ * the plugin stops loading for a reason the patch file does not show. These
+ * pin the hunk this script writes in its place, because the failure it
+ * prevents is invisible in a passing run.
+ */
+describe('newFileHunk', () => {
+  it('looks like a git diff that creates the file', () => {
+    const hunk = newFileHunk('lib/extra.js', 'export const a = 1\n')
+    assert.equal(
+      hunk,
+      [
+        'diff --git a/lib/extra.js b/lib/extra.js',
+        'new file mode 100644',
+        '--- /dev/null',
+        '+++ b/lib/extra.js',
+        '@@ -0,0 +1,1 @@',
+        '+export const a = 1',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('counts every line, and says so in the hunk header', () => {
+    const hunk = newFileHunk('lib/x.js', 'a\nb\nc\n')
+    assert.match(hunk, /^@@ -0,0 \+1,3 @@$/m)
+    assert.equal(hunk.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length, 3)
+  })
+
+  it('keeps a final line without a newline, and marks it', () => {
+    // Silently adding the newline would make the patched file differ from the
+    // source by a byte nobody asked for, and the next run would call the file
+    // changed rather than done.
+    const hunk = newFileHunk('lib/x.js', 'a\nb')
+    assert.match(hunk, /^\+b$/m)
+    assert.match(hunk, /^\\ No newline at end of file$/m)
+  })
+
+  it('emits no hunk header for an empty file', () => {
+    const hunk = newFileHunk('lib/x.js', '')
+    assert.ok(!hunk.includes('@@'), hunk)
+    assert.match(hunk, /^new file mode 100644$/m)
+  })
+})
+
+describe('forgetPatchState', () => {
+  const withState = (state: unknown) => {
+    const root = mkdtempSync(join(tmpdir(), 'pp-state-'))
+    roots.push(root)
+    writeFileSync(join(root, 'state.json'), typeof state === 'string' ? state : JSON.stringify(state))
+    return root
+  }
+
+  it('drops the entry naming the directory being re-extracted, and leaves the rest', () => {
+    const root = withState({
+      '/p/demo@1.0.0': { patchedPkg: 'demo@1.0.0' },
+      '/p/other@2.0.0': { patchedPkg: 'other@2.0.0' },
+    })
+    assert.equal(forgetPatchState(root, '/p/demo@1.0.0'), true)
+    const after2 = JSON.parse(readFileSync(join(root, 'state.json'), 'utf8'))
+    assert.deepEqual(Object.keys(after2), ['/p/other@2.0.0'])
+  })
+
+  it('reports doing nothing when there is no state, no entry, or nothing to parse', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'pp-state-'))
+    roots.push(empty)
+    assert.equal(forgetPatchState(empty, '/p/demo@1.0.0'), false, 'no state.json at all')
+    assert.equal(forgetPatchState(withState('{ not json'), '/p/demo@1.0.0'), false, 'unparseable state is left alone')
+    assert.equal(forgetPatchState(withState({ '/p/other@2.0.0': {} }), '/p/demo@1.0.0'), false, 'no entry for this directory')
+  })
+})
 })

@@ -44,10 +44,19 @@ function mergeEfforts(base, override) {
 
 const indentOf = (line) => line.length - line.replace(/^ +/, '').length
 
-function renderEffortBlock(efforts) {
+/**
+ * Render a `reasoningEfforts:` block for a model entry whose keys sit at `at`.
+ *
+ * The indent is derived rather than baked in. The ladder is a sibling of the
+ * model's own keys, so it has to land exactly one level below the dash: the
+ * live profile nests it twelve spaces deep (config > providers > nas > models
+ * > `- id:`), but a profile that declares models one level higher would get
+ * invalid YAML from a hardcoded twelve.
+ */
+function renderEffortBlock(efforts, at) {
   return [
-    '            reasoningEfforts:',
-    ...Object.keys(efforts).map((key) => `              ${key}: ${efforts[key]}`),
+    `${' '.repeat(at)}reasoningEfforts:`,
+    ...Object.keys(efforts).map((key) => `${' '.repeat(at + 2)}${key}: ${efforts[key]}`),
   ].join('\n')
 }
 
@@ -99,6 +108,10 @@ export function normalizePatchModels(raw, efforts) {
     if (dashRe.test(lines[i])) starts.push(i)
   }
 
+  const keyIndent = dash + 2
+  const ladderRe = new RegExp(`^ {${keyIndent}}reasoningEfforts:\\s*$`)
+  const tierRe = new RegExp(`^ {${keyIndent + 2},}\\S`)
+
   for (let k = starts.length - 1; k >= 0; k--) {
     const from = starts[k]
     let until = k + 1 < starts.length ? starts[k + 1] : stop
@@ -108,9 +121,9 @@ export function normalizePatchModels(raw, efforts) {
     // duplicate mapping keys, so leaving them behind keeps the patch
     // unparseable.
     for (let i = from; i < until; i++) {
-      if (!/^\s{12}reasoningEfforts:\s*$/.test(lines[i])) continue
+      if (!ladderRe.test(lines[i])) continue
       let end = i + 1
-      while (end < until && /^\s{14,}\S/.test(lines[end])) end++
+      while (end < until && tierRe.test(lines[end])) end++
       lines.splice(i, end - i)
       until -= end - i
       i--
@@ -118,7 +131,7 @@ export function normalizePatchModels(raw, efforts) {
 
     let insertAt = until
     while (insertAt - 1 > from && lines[insertAt - 1].trim() === '') insertAt--
-    lines.splice(insertAt, 0, ...renderEffortBlock(efforts).split('\n'))
+    lines.splice(insertAt, 0, ...renderEffortBlock(efforts, keyIndent).split('\n'))
   }
 
   return lines.join('\n')
