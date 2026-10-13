@@ -425,13 +425,14 @@ describe('seeding the built-in defaults', () => {
     apply(host.ctx)
     const state = await settled(host)
     assert.equal(state.spec?.initialized, true)
-    assert.equal(state.spec?.patches.length, 3)
+    assert.equal(state.spec?.patches.length, 4)
     // The hand-edits this profile actually carries, so the page is not
     // empty on a fresh install and the operator can see what the plugin is for.
     assert.deepEqual(state.spec?.patches.map((patch) => patch.id), [
       'plan-build-switch-command-arity',
       'think-translate-icons-and-seat',
       'reasoning-effort-force-effort-tiers',
+      'subagent-director-background-owner',
     ])
   })
 
@@ -452,7 +453,7 @@ describe('seeding the built-in defaults', () => {
     const state = await settled(host)
     // The seeded patches name real packages; this profile has one, so every one
     // of them lands on a state the operator can act on rather than on nothing.
-    assert.equal(state.statuses.length, 3)
+    assert.equal(state.statuses.length, 4)
     for (const status of state.statuses) assert.notEqual(status.state, 'pending')
   })
 
@@ -498,7 +499,7 @@ describe('seeding the built-in defaults', () => {
     host.emit('settings/document-updated', 'dsh-plugin-patcher', 1)
     const later = await settled(host, refused.reconciledAt)
     assert.equal(later.spec?.initialized, true)
-    assert.equal(later.spec?.patches.length, 3)
+    assert.equal(later.spec?.patches.length, 4)
     assert.equal(later.error, undefined)
   })
 
@@ -558,7 +559,7 @@ describe('seeding the built-in defaults', () => {
     const state = await settled(host)
     // Seeded or not, the page can always show what would be there, so an
     // operator who cleared the list can get it back without a reinstall.
-    assert.equal(state.defaults.length, 3)
+    assert.equal(state.defaults.length, 4)
     assert.deepEqual(state.defaultProblems, [])
   })
 })

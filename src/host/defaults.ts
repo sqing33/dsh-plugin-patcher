@@ -29,14 +29,15 @@ import type { Patch, PatcherConfig } from '../spec/types.ts'
 
 /**
  * The examples that make up the built-in default, in the order they are
- * written. Order is cosmetic — patches are applied one at a time and the
- * three touch three different packages — but a stable order makes a
- * reseeded spec byte-identical to the last one.
+ * written. Order is cosmetic — patches are applied one at a time and each
+ * one touches a different package — but a stable order makes a reseeded
+ * spec byte-identical to the last one.
  */
 export const DEFAULT_EXAMPLE_FILES: readonly string[] = [
   'plan-build-switch-command-arity.json',
   'think-translate-icons-and-seat.json',
   'reasoning-effort-force-effort-tiers.json',
+  'subagent-director-background-owner.json',
 ]
 
 /** Whether this module can still find the package it shipped with. */

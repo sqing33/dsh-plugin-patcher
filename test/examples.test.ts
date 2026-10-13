@@ -9,7 +9,7 @@ import { cliCommand } from '../src/adapters/package-file.ts'
 import { loadSpec } from '../src/spec/resolve.ts'
 import type { Patch } from '../src/spec/types.ts'
 
-// The examples are the shipped form of "this profile has three hand-edits on
+// The examples are the shipped form of "this profile has several hand-edits on
 // it". They are pasted into the page, so a malformed one is not a build
 // failure but a confusing runtime rejection — the only place they are checked
 // is here.
@@ -31,6 +31,7 @@ describe('the shipped examples', () => {
       [
         'plan-build-switch-command-arity.json',
         'reasoning-effort-force-effort-tiers.json',
+        'subagent-director-background-owner.json',
         'think-translate-icons-and-seat.json',
       ],
     )

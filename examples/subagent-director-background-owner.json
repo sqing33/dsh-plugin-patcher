@@ -1,0 +1,28 @@
+{
+  "patches": [
+    {
+      "id": "subagent-director-background-owner",
+      "enabled": true,
+      "reason": "dsh-plugin-subagent-director 0.5.5 hands jobs.start() the Agent object as the job owner instead of that agent's session id. dsh-jobs-local resolveOwner() looks the owner up as a live session, finds nothing and throws 'session \"[object Object]\" has no live agent (background job owner must be live)', so every subagent_role call that sets run_in_background: true fails before the subagent is ever started. The core subagent tool already passes parent.id (dsh-tool-subagent/lib/index.js), and dsh-tool-bash does the same; only this plugin gets it wrong.",
+      "target": {
+        "kind": "package-file",
+        "pkg": "dsh-plugin-subagent-director",
+        "version": "0.5.5",
+        "path": "lib/delegation-tool.js"
+      },
+      "op": {
+        "kind": "code",
+        "edits": [
+          {
+            "find": "                return {\n                    kind: 'background',\n                    jobId: jobs.start({\n                        kind: 'subagent',\n                        label: args.description,\n                        owner: parent,\n",
+            "replace": "                return {\n                    kind: 'background',\n                    jobId: jobs.start({\n                        kind: 'subagent',\n                        label: args.description,\n                        owner: parent.id,\n",
+            "count": 1
+          }
+        ],
+        "files": []
+      }
+    }
+  ],
+  "reconcileNonce": 0,
+  "initialized": false
+}

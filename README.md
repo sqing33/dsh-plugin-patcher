@@ -50,25 +50,26 @@ One patch ships as a generator rather than a fixed value: the reasoning-effort l
 { "$gen": "reasoning-ladder", "args": { "config": { "rungs": ["off", "medium", "high", "xhigh", "max"] } } }
 ```
 
-## Three examples, from a real profile
+## Four examples, from a real profile
 
-`examples/` holds three specs lifted from a profile that had been carrying hand-edits. They are ordinary specs: open one, copy the text, paste it into the page's import box.
+`examples/` holds four specs lifted from a profile that had been carrying hand-edits. They are ordinary specs: open one, copy the text, paste it into the page's import box.
 
 | file | the hand-edit it declares | state on the profile it came from |
 | --- | --- | --- |
 | `plan-build-switch-command-arity.json` | `dsh-plan-build-switch` calls `commands/execute` with two arguments; the 0.1.7 client contract wants three | `in-sync` — this is the one that broke the toggle |
 | `think-translate-icons-and-seat.json` | `dsh-think-translate` looks up pre-0.1.7 icon exports that now resolve to null | `in-sync` — no vendor, no guard script |
 | `reasoning-effort-force-effort-tiers.json` | `dsh-reasoning-effort` should be able to force a fixed tier set onto every model, and upstream has no such switch | `in-sync` — a fork used to supply it, and the fork is the thing this section exists to remove |
+| `subagent-director-background-owner.json` | `dsh-plugin-subagent-director` 0.5.5 passes the `Agent` object to `jobs.start()` as the job owner where `dsh-jobs-local` wants a session id, so every backgrounded delegation throws `session "[object Object]" has no live agent` | `drifted` — a real upstream bug, one line, and the core `dsh-tool-subagent` already passes `parent.id` |
 
-All three land once, through the CLI — or through the card's two buttons, which run that same CLI. What declaring them buys is the other half: the host re-reads the file on every reconcile and says on the page whether the installed copy still matches. That is what replaced the guard script the second one used to need, and it is also what lets a fork be deleted instead of maintained.
+All four land once, through the CLI — or through the card's two buttons, which run that same CLI. What declaring them buys is the other half: the host re-reads the file on every reconcile and says on the page whether the installed copy still matches. That is what replaced the guard script the second one used to need, and it is also what lets a fork be deleted instead of maintained.
 
-Every `find` in all three was checked against the package as published and as installed. On a profile where the CLI has run, all three read `in-sync`; on one where it has not, each reads `drifted` and prints the command that lands it.
+Every `find` in all four was checked against the package as published and as installed. On a profile where the CLI has run, the first three read `in-sync`; on one where it has not, each reads `drifted` and prints the command that lands it.
 
 An edit that inserts is written as "find this anchor, replace it with the anchor plus the new lines", so after it lands the find is still sitting inside its own replacement. The drift check looks for that containment rather than for the find having vanished, otherwise every inserted block would read as still missing and the CLI would insert it twice.
 
 ## Adding a file, not just a line
 
-The first two examples only *fix* things. The third is the other half of what this plugin is for: changing what a plugin does, without forking it.
+The first two examples only *fix* things. The third is the other half of what this plugin is for: changing what a plugin does, without forking it. The fourth fixes one more upstream bug outright.
 
 That needs more than edits. Adding a switch to an existing bundle means adding three lines to it and a hundred and fifty lines of new module, and those hundred and fifty lines are the part that matters. A spec is JSON inside a settings text box, so a module written there is a `
 `-escaped string that no editor will open, no diff will show and no linter will read. It is also the part most likely to be wrong: injected code that calls a symbol upstream renamed parses perfectly and then takes the whole web boot down with it.
@@ -86,7 +87,7 @@ So a code patch carries a second list. Each entry is a destination path and a re
 
 The host still does not write. It compares each declared file against what is installed, and reports `in-sync` only when the edits landed *and* every file matches. A file that is missing or differs is drift, with both byte counts in the detail — a file that differs is this patch's own ground, so "edit the source and run it again" is the normal loop, not a third-party edit worth a conflict.
 
-## The three that ship
+## The four that ship
 
 An empty spec watches nothing, so the first start writes the files in `examples/` into the plugin's own namespace and reconciles them in the same pass.
 
